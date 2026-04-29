@@ -28,6 +28,10 @@ path = "src/main.rs"
 name = "hostly-core"
 path = "src/bin/hostly-core.rs"
 
+[[bin]]
+name = "hostly-cli-elevated"
+path = "src/bin/hostly-cli-elevated.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

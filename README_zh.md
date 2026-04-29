@@ -74,9 +74,9 @@ npm run tauri build
 
 ### 常用命令行操作
 
-您可以使用 `hostly` 或 `hostly-core` 执行以下命令：
+您可以使用 `hostly`、`hostly-core`，或者发布页提供的 Windows CLI 二进制来执行以下命令：
 
-> **提示**: 在 Windows 下运行 CLI 命令会自动请求 UAC 提权。
+> **提示**: 在 Windows 下，`hostly-cli-elevated-win-x64.exe` 会自动请求 UAC 提权；`hostly-cli-win-x64.exe` 需要您手动以管理员身份运行。
 
 | 命令 | 说明 | 示例 |
 | :--- | :--- | :--- |
@@ -88,13 +88,13 @@ npm run tauri build
 | `import` | 导入配置或备份 | `hostly import --target`    全局配置.json  单个配置.txt 或者 http/https 链接 |
 | `migration` | 迁移 SwitchHosts 备份 | `hostly migration --target swV4_backup.json` |
 
-> 举例使用 hostly-core-win-x64.exe import ycf --target hosts.txt --open --single
+> 举例使用 hostly-cli-elevated-win-x64.exe import ycf --target hosts.txt --open --single
 > 更改为单选后导入 hots.txt 到ycf且生效，如果 ycf 不存在则创建
 
-> 举例使用 hostly-core-win-x64.exe import ycf --target hosts.txt --open --multi
+> 举例使用 hostly-cli-elevated-win-x64.exe import ycf --target hosts.txt --open --multi
 > 更改为多选后导入 hots.txt 到ycf且生效，如果 ycf 不存在则创建
 
-> 举例使用 hostly-core-win-x64.exe import ycf --target http://localhost:8080/hosts.txt --open --multi
+> 举例使用 hostly-cli-elevated-win-x64.exe import ycf --target http://localhost:8080/hosts.txt --open --multi
 > 更改为多选后导入 远程配置hots.txt 到ycf且生效，如果 ycf 不存在则创建
 
 ## 🛠️ 常见问题
@@ -106,7 +106,8 @@ npm run tauri build
 
 **Q: 推荐下载？**
 > A: 
-> - **Windows**: 普通用户推荐 `Hostly.exe`；如需手动管理权限请下载 > `hostly-off-elevation.exe`（需右键管理员运行）。
+> - **Windows GUI**: 普通用户推荐 `hostly-gui-elevated-win-x64.exe`；如果您想使用不自动提权的 GUI 版本，请下载 `hostly-gui-win-x64.exe`，需要时右键以管理员身份运行。
+> - **Windows CLI**: 需要自动弹 UAC 的请下载 `hostly-cli-elevated-win-x64.exe`；如果您想自行管理管理员权限，请下载 `hostly-cli-win-x64.exe`。
 > - **macOS (Apple Silicon / M1/M2...)**: 请下载带有 `aarch64` 或 `universal` 后缀的版本。
 > - **macOS (Intel)**: 请下载带有 `x86_64` 或 `universal` 后缀的版本。
 
@@ -119,8 +120,9 @@ npm run tauri build
 
 **Q: 双击打不开或提示权限不足？**
 > A: 请检查您使用的版本：
-> - **Hostly.exe (标准版)**: 内置自动提权逻辑，启动时会弹出 UAC 提示，请点击“是”允许。
-> - **hostly-off-elevation.exe (无提权版)**: 这是一个纯净版本，不包含任何提权代码。您必须**右键 -> 以管理员身份运行**，或者右键属性 -> 兼容性 -> 勾选“以管理员身份运行此程序”来永久提权。
+> - **hostly-gui-elevated-win-x64.exe**: 内置自动提权逻辑，启动时会弹出 UAC 提示，请点击“是”允许。
+> - **hostly-cli-elevated-win-x64.exe**: 内置 CLI 自动提权逻辑，执行命令时会在需要时通过 UAC 重新拉起。
+> - **hostly-gui-win-x64.exe / hostly-cli-win-x64.exe**: 这两个版本不包含自动提权逻辑。您必须**右键 -> 以管理员身份运行**，或者右键属性 -> 兼容性 -> 勾选“以管理员身份运行此程序”来永久提权。
 ---
 
 **Q: macOS 或 Linux 下提示 Permission Denied？**

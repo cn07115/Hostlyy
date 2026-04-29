@@ -74,9 +74,9 @@ npm run tauri build
 
 ### Common CLI Commands
 
-You can use `hostly` or `hostly-core` to run the following commands:
+You can use `hostly`, `hostly-core`, or the released Windows CLI binaries to run the following commands:
 
-> **Tip**: Running CLI commands on Windows will automatically request UAC elevation.
+> **Tip**: On Windows, `hostly-cli-elevated-win-x64.exe` automatically requests UAC elevation. `hostly-cli-win-x64.exe` must be run as Administrator manually.
 
 | Command | Description | Example |
 | :--- | :--- | :--- |
@@ -88,13 +88,13 @@ You can use `hostly` or `hostly-core` to run the following commands:
 | `import` | Import configuration or backup | `hostly import --target` &nbsp;&nbsp;&nbsp;global.json &nbsp;&nbsp;single.txt &nbsp;or an http/https URL |
 | `migration` | Migrate a SwitchHosts backup | `hostly migration --target swV4_backup.json` |
 
-> Example: `hostly-core-win-x64.exe import ycf --target hosts.txt --open --single`
+> Example: `hostly-cli-elevated-win-x64.exe import ycf --target hosts.txt --open --single`
 > Switches to single-select mode, imports hosts.txt into "ycf" and activates it. Creates "ycf" if it doesn't exist.
 
-> Example: `hostly-core-win-x64.exe import ycf --target hosts.txt --open --multi`
+> Example: `hostly-cli-elevated-win-x64.exe import ycf --target hosts.txt --open --multi`
 > Switches to multi-select mode, imports hosts.txt into "ycf" and activates it. Creates "ycf" if it doesn't exist.
 
-> Example: `hostly-core-win-x64.exe import ycf --target http://localhost:8080/hosts.txt --open --multi`
+> Example: `hostly-cli-elevated-win-x64.exe import ycf --target http://localhost:8080/hosts.txt --open --multi`
 > Switches to multi-select mode, imports the remote hosts.txt into "ycf" and activates it. Creates "ycf" if it doesn't exist.
 
 ## 🛠️ FAQ
@@ -106,7 +106,8 @@ You can use `hostly` or `hostly-core` to run the following commands:
 
 **Q: Which download is recommended?**
 > A:
-> - **Windows**: Regular users are recommended to download `Hostly.exe`; if you need to manage permissions manually, download `hostly-off-elevation.exe` (requires right-click → Run as Administrator).
+> - **Windows GUI**: Regular users are recommended to download `hostly-gui-elevated-win-x64.exe`. If you want a non-elevating GUI build, download `hostly-gui-win-x64.exe` and right-click → Run as Administrator when needed.
+> - **Windows CLI**: Use `hostly-cli-elevated-win-x64.exe` for automatic UAC prompts, or `hostly-cli-win-x64.exe` if you prefer to manage Administrator privileges manually.
 > - **macOS (Apple Silicon / M1/M2...)**: Download the version with the `aarch64` or `universal` suffix.
 > - **macOS (Intel)**: Download the version with the `x86_64` or `universal` suffix.
 
@@ -119,8 +120,9 @@ You can use `hostly` or `hostly-core` to run the following commands:
 
 **Q: Can't open with double-click or getting a permission error?**
 > A: Please check which version you are using:
-> - **Hostly.exe (Standard)**: Has built-in auto-elevation logic; a UAC prompt will appear on startup — click "Yes" to allow.
-> - **hostly-off-elevation.exe (No Elevation)**: This is a clean version with no elevation code. You must **right-click → Run as Administrator**, or go to Properties → Compatibility → check "Run this program as an administrator" for permanent elevation.
+> - **hostly-gui-elevated-win-x64.exe**: Has built-in auto-elevation logic; a UAC prompt will appear on startup — click "Yes" to allow.
+> - **hostly-cli-elevated-win-x64.exe**: Has built-in auto-elevation logic for CLI commands and will relaunch through UAC when needed.
+> - **hostly-gui-win-x64.exe / hostly-cli-win-x64.exe**: These builds do not include auto-elevation. You must **right-click → Run as Administrator**, or go to Properties → Compatibility → check "Run this program as an administrator" for permanent elevation.
 ---
 
 **Q: Getting "Permission Denied" on macOS or Linux?**

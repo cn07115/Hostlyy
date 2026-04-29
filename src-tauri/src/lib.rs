@@ -1,6 +1,7 @@
 mod hosts;
 pub mod storage;
 pub mod cli;
+pub mod elevation;
 
 #[cfg(target_os = "windows")]
 use window_vibrancy::apply_mica;

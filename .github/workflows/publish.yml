@@ -133,9 +133,17 @@ jobs:
             cargo build --release --bin hostly-core --target aarch64-apple-darwin
             mkdir -p target/universal-apple-darwin/release
             lipo -create target/x86_64-apple-darwin/release/hostly-core target/aarch64-apple-darwin/release/hostly-core -output target/universal-apple-darwin/release/hostly-core
+          elif [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+            cargo build --release --no-default-features --bin hostly-core
           else
             cargo build --release --bin hostly-core ${{ matrix.args }}
           fi
+        working-directory: src-tauri
+
+      - name: Build Elevated Windows CLI
+        if: matrix.platform == 'windows-latest' && matrix.no_elevation != true
+        shell: bash
+        run: cargo build --release --bin hostly-cli-elevated
         working-directory: src-tauri
 
       - name: Build Tauri App (No Elevation)
@@ -143,15 +151,15 @@ jobs:
         shell: pwsh
         run: |
           npm run tauri -- build -- --no-default-features
-          cp src-tauri/target/release/hostly.exe hostly-off-elevation.exe
-          upx --best hostly-off-elevation.exe
+          cp src-tauri/target/release/hostly.exe hostly-gui-win-x64.exe
+          upx --best hostly-gui-win-x64.exe
 
-      - name: Upload No-Elevation Artifact
+      - name: Upload Non-Elevated GUI Artifact
         if: matrix.no_elevation == true
         uses: softprops/action-gh-release@v1
         with:
           tag_name: releases
-          files: hostly-off-elevation.exe
+          files: hostly-gui-win-x64.exe
           token: ${{ secrets.GITHUB_TOKEN }}
           fail_on_unmatched_files: true
 
@@ -177,26 +185,30 @@ jobs:
           fi
           cp "$SRC" "$DEST"
 
-      - name: Prepare Hostly-Core Path (Windows)
-        if: matrix.platform == 'windows-latest'
+      - name: Prepare Windows Artifact Paths
+        if: matrix.platform == 'windows-latest' && matrix.no_elevation != true
         shell: pwsh
         run: |
-          cp src-tauri/target/release/hostly-core.exe hostly-core-win-x64.exe
+          cp src-tauri/target/release/hostly.exe hostly-gui-elevated-win-x64.exe
+          cp src-tauri/target/release/hostly-core.exe hostly-cli-win-x64.exe
+          cp src-tauri/target/release/hostly-cli-elevated.exe hostly-cli-elevated-win-x64.exe
 
       - name: UPX Compress (Windows only)
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-latest' && matrix.no_elevation != true
         shell: pwsh
         run: |
-          upx --best src-tauri/target/release/hostly.exe
-          upx --best hostly-core-win-x64.exe
+          upx --best hostly-gui-elevated-win-x64.exe
+          upx --best hostly-cli-win-x64.exe
+          upx --best hostly-cli-elevated-win-x64.exe
 
       - name: Upload Binaries
         uses: softprops/action-gh-release@v1
         with:
           tag_name: releases
           files: |
-            src-tauri/target/release/hostly.exe
-            hostly-core-win-x64.exe
+            hostly-gui-elevated-win-x64.exe
+            hostly-cli-win-x64.exe
+            hostly-cli-elevated-win-x64.exe
             hostly-core-macos-arm64
             hostly-core-macos-x64
             hostly-core-macos-universal
