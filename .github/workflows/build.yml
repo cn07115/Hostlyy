@@ -1,0 +1,187 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.platform }} (${{ matrix.target || 'native' }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: hostly-windows-x64
+            elevation: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: hostly-windows-x64-no-elevate
+            elevation: false
+          # macOS
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: hostly-macos-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: hostly-macos-x64
+          - os: macos-latest
+            target: universal-apple-darwin
+            artifact: hostly-macos-universal
+          # Linux
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: hostly-linux-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Rust target
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == universal-apple-darwin ]]; then
+            rustup target add x86_64-apple-darwin aarch64-apple-darwin
+          else
+            rustup target add ${{ matrix.target }}
+          fi
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install npm deps
+        run: npm ci || npm install
+
+      # ===== Windows build =====
+      - name: Build Tauri (Windows, with elevation)
+        if: matrix.os == 'windows-latest' && matrix.elevation
+        shell: pwsh
+        run: |
+          npm run tauri -- build
+          Copy-Item src-tauri/target/release/hostly.exe -Destination hostly-gui-elevated-${{ matrix.target }}.exe -Force
+          Copy-Item src-tauri/target/release/hostly-cli-elevated.exe -Destination hostly-cli-elevated-${{ matrix.target }}.exe -Force
+          Copy-Item src-tauri/target/release/hostly-core.exe -Destination hostly-cli-${{ matrix.target }}.exe -Force
+
+      - name: Build Tauri (Windows, NO elevation)
+        if: matrix.os == 'windows-latest' && !matrix.elevation
+        shell: pwsh
+        run: |
+          npm run tauri -- build -- --no-default-features
+          Copy-Item src-tauri/target/release/hostly.exe -Destination hostly-gui-${{ matrix.target }}.exe -Force
+          Copy-Item src-tauri/target/release/hostly-core.exe -Destination hostly-core-${{ matrix.target }}.exe -Force
+
+      # ===== macOS build =====
+      - name: Build Tauri (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          if [[ "${{ matrix.target }}" == universal-apple-darwin ]]; then
+            npm run tauri -- build -- --target universal-apple-darwin
+          else
+            npm run tauri -- build -- --target ${{ matrix.target }}
+          fi
+
+      # ===== Linux build =====
+      - name: Build Tauri (Linux)
+        if: matrix.os == 'Linux'
+        run: |
+          npm run tauri -- build
+
+      # ===== Universal macOS bundling =====
+      - name: Make universal macOS binary
+        if: matrix.target == 'universal-apple-darwin'
+        run: |
+          # Tauri universal build already produces the .app; here we additionally
+          # create a fat binary of the hostly-core CLI for distribution.
+          cargo build --release --bin hostly-core --target x86_64-apple-darwin
+          cargo build --release --bin hostly-core --target aarch64-apple-darwin
+          mkdir -p src-tauri/target/universal-apple-darwin/release
+          lipo -create \
+            src-tauri/target/x86_64-apple-darwin/release/hostly-core \
+            src-tauri/target/aarch64-apple-darwin/release/hostly-core \
+            -output src-tauri/target/universal-apple-darwin/release/hostly-core
+        working-directory: src-tauri
+
+      # ===== Collect artifacts =====
+      - name: Stage artifacts (Windows)
+        if: matrix.os == 'windows-latest' && matrix.elevation
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item hostly-gui-elevated-*.exe artifacts/
+          Copy-Item hostly-cli-elevated-*.exe artifacts/
+          Copy-Item hostly-cli-*.exe artifacts/
+          Get-ChildItem src-tauri/target/release/bundle -Recurse -File |
+            Where-Object { $_.Extension -in '.msi', '.exe' } |
+            Copy-Item -Destination artifacts/
+
+      - name: Stage artifacts (Windows no-elevate)
+        if: matrix.os == 'windows-latest' && !matrix.elevation
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item hostly-gui-*.exe artifacts/
+          Copy-Item hostly-core-*.exe artifacts/
+
+      - name: Stage artifacts (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p artifacts
+          # The .app bundle
+          if [[ "${{ matrix.target }}" == universal-apple-darwin ]]; then
+            cp -R src-tauri/target/universal-apple-darwin/release/bundle/macos/Hostly.app artifacts/ || true
+            cp src-tauri/target/universal-apple-darwin/release/hostly-core artifacts/hostly-core-universal
+          else
+            cp -R src-tauri/target/${{ matrix.target }}/release/bundle/macos/Hostly.app artifacts/ || true
+            cp src-tauri/target/${{ matrix.target }}/release/hostly-core artifacts/ || true
+          fi
+          # DMG / pkg if produced
+          find src-tauri/target -name '*.dmg' -exec cp {} artifacts/ \; 2>/dev/null || true
+
+      - name: Stage artifacts (Linux)
+        if: matrix.os == 'Linux'
+        run: |
+          mkdir -p artifacts
+          cp src-tauri/target/release/hostly artifacts/hostly-bin || true
+          cp src-tauri/target/release/hostly-core artifacts/hostly-core || true
+          find src-tauri/target/release/bundle -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' |
+            xargs -I {} cp {} artifacts/ 2>/dev/null || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/**
+          if-no-files-found: warn
+          retention-days: 14

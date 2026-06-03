@@ -21,16 +21,22 @@ pub struct ProfileMetadata {
 pub struct AppConfig {
     pub multi_select: bool,
     pub theme: Option<String>,
-    pub window_mode: Option<String>, // "fixed", "remember"
+    pub window_mode: Option<String>,
     pub window_width: Option<f64>,
     pub window_height: Option<f64>,
     pub sidebar_width: Option<f64>,
     pub profiles: Vec<ProfileMetadata>,
-    pub active_profile_ids: Vec<String>, // Deprecated in favor of internal active flag? Or keep synced? 
-                                         // Let's keep synced or just use 'active' field in ProfileMetadata for simplicity.
-                                         // Actually, sticking to what I planned: ProfileMetadata has 'active'. 
-                                         // But for multi-select logic, we need to know who is active quickly. 
-                                         // Let's trust ProfileMetadata.active as source of truth.
+    pub active_profile_ids: Vec<String>,
+    #[serde(default)]
+    pub auto_start: bool,
+    #[serde(default = "default_close_behavior")]
+    pub close_behavior: String,
+    #[serde(default)]
+    pub remember_close_choice: bool,
+}
+
+fn default_close_behavior() -> String {
+    "exit".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -103,6 +109,9 @@ pub fn load_config_internal(ctx: &Context) -> Result<AppConfig, String> {
         // First Run: Create defaults
         let mut config = AppConfig::default();
         config.multi_select = false;
+        config.auto_start = false;
+        config.close_behavior = "exit".to_string();
+        config.remember_close_choice = false;
         
         let defaults = vec!["Dev", "Test", "Prod"];
         
@@ -786,5 +795,49 @@ fn download_single_url(url: &str) -> Result<String, String> {
     } else {
         Err(format!("HTTP Error {} from {}", response.status_code, url))
     }
+}
+
+#[tauri::command]
+pub fn set_auto_start(app: AppHandle, enable: bool) -> Result<(), String> {
+    let ctx = Context::Tauri(&app);
+    crate::autostart::set_auto_start(&app, enable)?;
+    let mut config = load_config_internal(&ctx)?;
+    config.auto_start = enable;
+    save_config_internal(&ctx, &config)
+}
+
+#[tauri::command]
+pub fn get_auto_start(app: AppHandle) -> Result<bool, String> {
+    Ok(crate::autostart::is_auto_start_enabled(&app))
+}
+
+#[tauri::command]
+pub fn save_close_behavior(app: AppHandle, behavior: String) -> Result<(), String> {
+    let ctx = Context::Tauri(&app);
+    let mut config = load_config_internal(&ctx)?;
+    config.close_behavior = behavior;
+    save_config_internal(&ctx, &config)
+}
+
+#[tauri::command]
+pub fn get_close_behavior(app: AppHandle) -> Result<String, String> {
+    let ctx = Context::Tauri(&app);
+    let config = load_config_internal(&ctx)?;
+    Ok(config.close_behavior)
+}
+
+#[tauri::command]
+pub fn save_remember_close_choice(app: AppHandle, remember: bool) -> Result<(), String> {
+    let ctx = Context::Tauri(&app);
+    let mut config = load_config_internal(&ctx)?;
+    config.remember_close_choice = remember;
+    save_config_internal(&ctx, &config)
+}
+
+#[tauri::command]
+pub fn get_remember_close_choice(app: AppHandle) -> Result<bool, String> {
+    let ctx = Context::Tauri(&app);
+    let config = load_config_internal(&ctx)?;
+    Ok(config.remember_close_choice)
 }
 

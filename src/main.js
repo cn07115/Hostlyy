@@ -1,12 +1,24 @@
 const tauri = window.__TAURI__ || {};
 const { invoke } = tauri.core || {};
 const { ask, message, open, save: saveDialog } = tauri.dialog || {};
-const { readTextFile, writeTextFile } = tauri.fs || {}; // We'll use backend commands instead
+const { readTextFile, writeTextFile } = tauri.fs || {};
+
+let listen = null;
+
+function setupListen() {
+    if (tauri.event && typeof tauri.event.listen === 'function') {
+        listen = tauri.event.listen;
+    } else if (tauri.core && typeof tauri.core.listen === 'function') {
+        listen = tauri.core.listen;
+    }
+}
 
 console.log('Tauri APIs initialized:', {
     hasInvoke: !!invoke,
     hasDialog: !!ask,
-    hasFs: !!readTextFile
+    hasFs: !!readTextFile,
+    hasEvent: !!tauri.event,
+    hasCore: !!tauri.core
 });
 
 // State
@@ -832,9 +844,10 @@ async function setTheme(mode, persist = true) {
 settingsBtn.onclick = () => {
     settingsModalOverlay.classList.remove('hidden');
 
-    
-    // Sync Window UI
-    initWindowSettings();
+    Promise.all([
+        initWindowSettings(),
+        initSystemSettings()
+    ]);
 };
 
 const closeSettings = () => settingsModalOverlay.classList.add('hidden');
@@ -933,6 +946,104 @@ document.getElementById('window-size-select').onchange = (e) => {
     saveWindowConfig('fixed', w, h);
 };
 
+async function initSystemSettings() {
+    try {
+        const [autoStart, closeBehavior, rememberClose] = await Promise.all([
+            invoke('get_auto_start'),
+            invoke('get_close_behavior'),
+            invoke('get_remember_close_choice')
+        ]);
+        
+        document.getElementById('auto-start-checkbox').checked = autoStart;
+        
+        const closeRadios = document.getElementsByName('close-behavior');
+        closeRadios.forEach(r => {
+            r.checked = r.value === closeBehavior;
+        });
+        
+        document.getElementById('remember-close-checkbox').checked = rememberClose;
+        updateRememberGroupVisibility(closeBehavior);
+    } catch(e) { console.error('Failed to load system settings:', e); }
+}
+
+function updateRememberGroupVisibility(closeBehavior) {
+    const group = document.getElementById('remember-close-group');
+    if (group) {
+        group.classList.toggle('hidden', closeBehavior === 'exit');
+    }
+}
+
+document.getElementById('auto-start-checkbox').onchange = async (e) => {
+    try {
+        await invoke('set_auto_start', { enable: e.target.checked });
+        showToast(e.target.checked ? '已开启开机自启' : '已关闭开机自启', 'success');
+    } catch(e) {
+        e.target.checked = !e.target.checked;
+        showToast(`设置失败: ${e}`, 'error');
+    }
+};
+
+document.getElementsByName('close-behavior').forEach(r => {
+    r.onchange = async (e) => {
+        const behavior = e.target.value;
+        try {
+            await invoke('save_close_behavior', { behavior });
+            updateRememberGroupVisibility(behavior);
+            showToast('已保存关闭行为设置', 'success');
+        } catch(e) { console.error(e); }
+    };
+});
+
+document.getElementById('remember-close-checkbox').onchange = async (e) => {
+    try {
+        await invoke('save_remember_close_choice', { remember: e.target.checked });
+        showToast(e.target.checked ? '已记住本次选择' : '已取消记住', 'success');
+    } catch(e) { console.error(e); }
+};
+
+// Close Confirm Dialog Logic
+const closeConfirmOverlay = document.getElementById('close-confirm-overlay');
+const closeToTrayBtn = document.getElementById('close-to-tray-btn');
+const closeExitBtn = document.getElementById('close-exit-btn');
+const closeRememberCheckbox = document.getElementById('close-remember-checkbox');
+
+function showCloseDialog() {
+    closeRememberCheckbox.checked = false;
+    closeConfirmOverlay.classList.remove('hidden');
+}
+
+function hideCloseDialog() {
+    closeConfirmOverlay.classList.add('hidden');
+}
+
+closeToTrayBtn.onclick = async () => {
+    const remember = closeRememberCheckbox.checked;
+    try {
+        if (remember) {
+            await invoke('save_close_behavior', { behavior: 'tray' });
+            await invoke('save_remember_close_choice', { remember: true });
+        }
+        hideCloseDialog();
+        await invoke('hide_to_tray');
+    } catch(e) { console.error(e); }
+};
+
+closeExitBtn.onclick = async () => {
+    const remember = closeRememberCheckbox.checked;
+    try {
+        if (remember) {
+            await invoke('save_close_behavior', { behavior: 'exit' });
+            await invoke('save_remember_close_choice', { remember: true });
+        }
+        hideCloseDialog();
+        await invoke('exit_app');
+    } catch(e) { console.error(e); }
+};
+
+closeConfirmOverlay.onclick = (e) => {
+    if (e.target === closeConfirmOverlay) hideCloseDialog();
+};
+
 // Init
 window.addEventListener('DOMContentLoaded', async () => {
     await initTheme();
@@ -940,7 +1051,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     await initSidebarWidth();
     await loadData();
     selectProfile('system');
-    // Show window only after everything is ready to avoid flash
+
+    setupListen();
+    if (listen) {
+        listen('show-close-dialog', () => {
+            // Use the custom in-app modal directly — the system ask() dialog
+            // can fail silently (focus/permission issues) and leaves the user
+            // thinking the close button is broken.
+            showCloseDialog();
+        });
+    } else {
+        console.error('Tauri event.listen is unavailable; close-to-tray dialog will not be wired.');
+    }
+
     setTimeout(() => {
         invoke('show_main_window');
     }, 50);

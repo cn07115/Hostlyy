@@ -25,3 +25,8 @@ dist-ssr
 
 target/*
 upx-5.1.0-win64
+
+# Local dev artifacts
+.omx/
+build.log
+trash_args*.json

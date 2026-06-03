@@ -621,7 +621,7 @@ input:checked + .slider:before {
 }
 
 /* Modal */
-.modal-overlay, #modal-overlay, #settings-modal-overlay {
+.modal-overlay, #modal-overlay, #settings-modal-overlay, #close-confirm-overlay {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.6);
@@ -829,6 +829,21 @@ input[type="text"]:focus, textarea:focus, select:focus {
 .radio-label input:checked + span {
     background: var(--accent-color);
     color: white;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--accent-color);
 }
 
 /* Auto Update UI - Shared classes being used now, removing specific ones or keeping row layout */
