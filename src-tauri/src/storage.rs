@@ -356,6 +356,7 @@ fn create_default_config(ctx: &Context) -> Result<AppConfig, String> {
         url: None,
         last_update: None,
         update_interval: None,
+        last_hash: None,
     });
 
     // 2. Default Envs
@@ -369,6 +370,7 @@ fn create_default_config(ctx: &Context) -> Result<AppConfig, String> {
             url: None,
             last_update: None,
             update_interval: None,
+            last_hash: None,
         });
     }
 
@@ -512,6 +514,7 @@ pub fn create_profile_internal(
         url,
         last_update: None,
         update_interval,
+        last_hash: None,
     });
     
     save_config_internal(ctx, &config)?;
