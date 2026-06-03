@@ -29,7 +29,7 @@
       "endpoints": [
         "https://github.com/cn07115/Hostlyy/releases/latest/download/latest.json"
       ],
-      "pubkey": "REPLACE_ME_AFTER_RUNNING_cargo_tauri_signer_generate",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwMzlBN0M3NkU1MEE5NjAKUldSZ3FWQnV4NmM1MEsrOU9rSTRCeUVldndWVzhSZUdNTDkrb3ZLK2FtenRRQkFNVzc5eWMwM2EK",
       "windows": {
         "installMode": "passive"
       }
