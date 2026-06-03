@@ -30,3 +30,6 @@ upx-5.1.0-win64
 .omx/
 build.log
 trash_args*.json
+
+# Personal AI session notes (not for the public repo)
+AGENTS.md
