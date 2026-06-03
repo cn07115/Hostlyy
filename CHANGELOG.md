@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-06-04
+
+### 🐛 修复 + 性能 (Fixes & Performance)
+
+- **修 toast 啰嗦**:`webdavSyncBtn` 之前会拼出「同步完成: 上传 10 个 | ⚠ hostly/profiles/<id>.txt: 本地修改时间比远端新 20607 天; ...」一长串。**修法**:toast 只显示「同步完成」+ 极简统计(上传 N 个 / 下载 N 个 / 删除 N 个),warning 字符串不再进 toast(只在 console.warn 留个 log);错误时 toast 只报「部分完成 (X 个错误)」,详细错误进 console.error。完整 SyncResult 一直在 console 里,要查细节 F12 开 devtools 就能看。
+- **修 staleness 检查 false positive**:`check_staleness` 之前对所有「remote_mtime == 0」的文件都会警告,因为 0 视作 epoch,而本地 mtime 是「现在」,差值就是 20607 天(epoch 到 2026)。**修法**:`remote_mtime == 0` 时直接返回 None,不警告。**注意**:这一改也意味着**首次 sync 不再 toast 一堆警告**(真警告只有后续 sync 中"远端之前更新过、本地又改"的情况)。
+- **修 sync 慢**:`perform_sync` 5a/5b/5c 三个循环之前是**单线程串行** HTTP,10 个 profile 文件要 10*RTT 才能传完。**修法**:用 `std::thread::scope` 把所有 PUT/GET/DELETE 并行起来,4 个结果收集器各自一个 `Arc<Mutex<Vec>>`,每个文件独立线程跑。理论上 N 个文件从 N*RTT 降到 ~1*RTT(实际受 WebDAV server 并发连接数限制,通常 5-10 倍加速)。**注意**:每个 HTTP 调用还是用 minreq sync 模式(没共享 Client 连接池),所以实际加速比理论小,后续可以再优化成共享 Client。
+
 ## [1.2.5] - 2026-06-03
 
 ### 🐛 修复 (Fixes)

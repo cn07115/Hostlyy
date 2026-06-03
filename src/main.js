@@ -1062,21 +1062,6 @@ webdavSaveBtn.onclick = async () => {
     }
 };
 
-// Format SyncResult summary on the frontend. The Rust `summary()` method
-// doesn't survive Tauri serialization (only struct fields cross the IPC
-// boundary), so we re-implement it in JS.
-function formatSyncSummary(r) {
-    const parts = [];
-    if (r.uploaded && r.uploaded.length) parts.push(`上传 ${r.uploaded.length} 个`);
-    if (r.downloaded && r.downloaded.length) parts.push(`下载 ${r.downloaded.length} 个`);
-    if (r.deleted_remote && r.deleted_remote.length) parts.push(`远端删除 ${r.deleted_remote.length} 个`);
-    if (r.errors && r.errors.length) {
-        const base = parts.length ? parts.join('，') : '无变化';
-        return `${base}；错误 ${r.errors.length} 个`;
-    }
-    return parts.length ? parts.join('，') : '无变化';
-}
-
 webdavTestBtn.onclick = async () => {
     const url = (webdavUrlEl.value || '').trim();
     const username = (webdavUsernameEl.value || '').trim();
@@ -1115,13 +1100,28 @@ webdavSyncBtn.onclick = async () => {
             showToast('WebDAV 未配置,跳过了同步', 'info');
             return;
         }
-        const warnMsg = (result.warnings && result.warnings.length > 0)
-            ? ` | ⚠ ${result.warnings.join('; ')}`
-            : '';
         if (result.errors && result.errors.length > 0) {
-            showToast(`部分完成: ${formatSyncSummary(result)}${warnMsg}`, 'error');
+            // 部分完成:只报错误数,完整错误进 console(用户不需要在 toast 里看一堆文件名)
+            console.error('WebDAV 同步部分失败:', result);
+            showToast(`部分完成 (${result.errors.length} 个错误)`, 'error');
         } else {
-            showToast(`同步完成: ${formatSyncSummary(result)}${warnMsg}`, 'success');
+            // 成功:toast 极简,详细统计(上传/下载/删除)进 console
+            console.log('WebDAV 同步完成:', result);
+            if (result.uploaded.length === 0
+                && result.downloaded.length === 0
+                && result.deleted_remote.length === 0) {
+                showToast('同步完成 (无变化)', 'success');
+            } else {
+                const parts = [];
+                if (result.uploaded.length) parts.push(`上传 ${result.uploaded.length} 个`);
+                if (result.downloaded.length) parts.push(`下载 ${result.downloaded.length} 个`);
+                if (result.deleted_remote.length) parts.push(`删除 ${result.deleted_remote.length} 个`);
+                showToast(`同步完成 (${parts.join('，')})`, 'success');
+            }
+        }
+        // 警告不再进 toast(以前会拉一长串);只在 console 留个 log 给调试用
+        if (result.warnings && result.warnings.length > 0) {
+            console.warn('WebDAV 同步警告:', result.warnings);
         }
     } catch(e) {
         await loadWebdavStatus();

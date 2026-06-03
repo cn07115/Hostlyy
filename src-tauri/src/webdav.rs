@@ -206,69 +206,130 @@ pub fn perform_sync(
         .cloned()
         .unwrap_or_default();
 
-    // 5a. Upload/download matching profiles
-    for (id, local_mtime) in &local_profiles {
-        let url = format!("{}/{}/{}.txt", base, PROFILES_REMOTE_DIR, id);
-        let remote_mtime = remote_profiles.get(&url).copied().unwrap_or(0);
-        if *local_mtime > remote_mtime {
-            if let Some(warn) = check_staleness(*local_mtime, remote_mtime) {
-                result.warnings.push(format!("{}/{}.txt: {}", PROFILES_REMOTE_DIR, id, warn));
-            }
+    // Collectors shared across worker threads (no per-op mutex contention:
+    // each thread writes to a different collector).
+    use std::sync::{Arc, Mutex};
+    let uploaded: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let downloaded: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let warnings: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let deleted_remote: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+    std::thread::scope(|s| {
+        // 5a. Upload/download matching profiles — parallel
+        for (id, local_mtime) in &local_profiles {
+            let id = id.clone();
+            let local_mtime = *local_mtime;
+            let url = format!("{}/{}/{}.txt", base, PROFILES_REMOTE_DIR, id);
+            let remote_mtime = remote_profiles.get(&url).copied().unwrap_or(0);
             let path = profiles_dir.join(format!("{}.txt", id));
-            if path.exists() {
-                let content = std::fs::read_to_string(&path).unwrap_or_default();
-                match dav_put(&url, &config.username, password, &content) {
-                    Ok(()) => result.uploaded.push(format!("{}/{}.txt", PROFILES_REMOTE_DIR, id)),
-                    Err(e) => result.errors.push(format!("上传 {}.txt 失败: {}", id, e)),
+            let uploaded = Arc::clone(&uploaded);
+            let downloaded = Arc::clone(&downloaded);
+            let errors = Arc::clone(&errors);
+            let warnings = Arc::clone(&warnings);
+
+            s.spawn(move || {
+                if local_mtime > remote_mtime {
+                    if let Some(warn) = check_staleness(local_mtime, remote_mtime) {
+                        warnings
+                            .lock()
+                            .unwrap()
+                            .push(format!("{}/{}.txt: {}", PROFILES_REMOTE_DIR, id, warn));
+                    }
+                    if path.exists() {
+                        let content = std::fs::read_to_string(&path).unwrap_or_default();
+                        match dav_put(&url, &config.username, password, &content) {
+                            Ok(()) => uploaded
+                                .lock()
+                                .unwrap()
+                                .push(format!("{}/{}.txt", PROFILES_REMOTE_DIR, id)),
+                            Err(e) => errors
+                                .lock()
+                                .unwrap()
+                                .push(format!("上传 {}.txt 失败: {}", id, e)),
+                        }
+                    }
+                } else if remote_mtime > local_mtime {
+                    match dav_get(&url, &config.username, password) {
+                        Ok(content) => {
+                            let _ = std::fs::write(&path, &content);
+                            downloaded
+                                .lock()
+                                .unwrap()
+                                .push(format!("{}/{}.txt", PROFILES_REMOTE_DIR, id));
+                        }
+                        Err(e) => errors
+                            .lock()
+                            .unwrap()
+                            .push(format!("下载 {}.txt 失败: {}", id, e)),
+                    }
                 }
+            });
+        }
+
+        // 5b. Download remote-only profiles — parallel
+        for (url, _remote_mtime) in &remote_profiles {
+            if !url.contains(&format!("/{}/", PROFILES_REMOTE_DIR)) {
+                continue;
             }
-        } else if remote_mtime > *local_mtime {
-            match dav_get(&url, &config.username, password) {
+            let filename = url.rsplit('/').next().unwrap_or("").to_string();
+            let id = filename.trim_end_matches(".txt").to_string();
+            if local_profiles.contains_key(&id) {
+                continue;
+            }
+            let url = url.clone();
+            let path = profiles_dir.join(&filename);
+            let downloaded = Arc::clone(&downloaded);
+            let errors = Arc::clone(&errors);
+
+            s.spawn(move || match dav_get(&url, &config.username, password) {
                 Ok(content) => {
-                    let path = profiles_dir.join(format!("{}.txt", id));
-                    std::fs::write(&path, &content).map_err(|e| format!("写入本地 {}.txt 失败: {}", id, e)).ok();
-                    result.downloaded.push(format!("{}/{}.txt", PROFILES_REMOTE_DIR, id));
+                    let _ = std::fs::write(&path, &content);
+                    downloaded
+                        .lock()
+                        .unwrap()
+                        .push(format!("{}/{}", PROFILES_REMOTE_DIR, filename));
                 }
-                Err(e) => result.errors.push(format!("下载 {}.txt 失败: {}", id, e)),
-            }
+                Err(e) => errors
+                    .lock()
+                    .unwrap()
+                    .push(format!("下载 {} 失败: {}", filename, e)),
+            });
         }
-    }
 
-    // 5b. Download remote-only profiles
-    for (url, remote_mtime) in &remote_profiles {
-        if !url.contains(&format!("/{}/", PROFILES_REMOTE_DIR)) {
-            continue; // Only handle profiles in this pass
-        }
-        let filename = url.rsplit('/').next().unwrap_or("");
-        let id = filename.trim_end_matches(".txt");
-        if local_profiles.contains_key(id) {
-            continue; // Already handled above
-        }
-        match dav_get(url, &config.username, password) {
-            Ok(content) => {
-                let path = profiles_dir.join(filename);
-                std::fs::write(&path, &content).ok();
-                result.downloaded.push(format!("{}/{}", PROFILES_REMOTE_DIR, filename));
+        // 5c. Delete remote profiles that don't exist locally — parallel
+        for (url, _) in &remote_profiles {
+            if !url.contains(&format!("/{}/", PROFILES_REMOTE_DIR)) {
+                continue;
             }
-            Err(e) => result.errors.push(format!("下载 {} 失败: {}", filename, e)),
-        }
-        let _ = remote_mtime; // currently unused
-    }
+            let filename = url.rsplit('/').next().unwrap_or("").to_string();
+            let id = filename.trim_end_matches(".txt").to_string();
+            if local_profiles.contains_key(&id) {
+                continue;
+            }
+            let url = url.clone();
+            let deleted_remote = Arc::clone(&deleted_remote);
+            let errors = Arc::clone(&errors);
 
-    // 5c. Delete remote profiles that don't exist locally
-    for (url, _) in &remote_profiles {
-        if !url.contains(&format!("/{}/", PROFILES_REMOTE_DIR)) {
-            continue;
+            s.spawn(move || match dav_delete(&url, &config.username, password) {
+                Ok(()) => deleted_remote
+                    .lock()
+                    .unwrap()
+                    .push(format!("{}/{}", PROFILES_REMOTE_DIR, filename)),
+                Err(e) => errors
+                    .lock()
+                    .unwrap()
+                    .push(format!("删除远端 {} 失败: {}", filename, e)),
+            });
         }
-        let filename = url.rsplit('/').next().unwrap_or("");
-        let id = filename.trim_end_matches(".txt");
-        if !local_profiles.contains_key(id) {
-            match dav_delete(url, &config.username, password) {
-                Ok(()) => result.deleted_remote.push(format!("profiles/{}", filename)),
-                Err(e) => result.errors.push(format!("删除远端 {} 失败: {}", filename, e)),
-            }
-        }
-    }
+    });
+
+    // Collect results back
+    result.uploaded = Arc::try_unwrap(uploaded).unwrap().into_inner().unwrap();
+    result.downloaded = Arc::try_unwrap(downloaded).unwrap().into_inner().unwrap();
+    result.errors = Arc::try_unwrap(errors).unwrap().into_inner().unwrap();
+    result.warnings = Arc::try_unwrap(warnings).unwrap().into_inner().unwrap();
+    result.deleted_remote = Arc::try_unwrap(deleted_remote).unwrap().into_inner().unwrap();
 
     Ok(result)
 }
@@ -630,6 +691,12 @@ impl SyncScheduler {
 const STALE_WARNING_DAYS: i64 = 30;
 
 pub fn check_staleness(local_mtime: i64, remote_mtime: i64) -> Option<String> {
+    // First-time sync (remote_mtime == 0): the file has never been on the
+    // remote, so the "local newer than remote by N days" check is meaningless
+    // (it would always fire because 0 is treated as epoch). Skip the warning.
+    if remote_mtime == 0 {
+        return None;
+    }
     let diff = local_mtime - remote_mtime;
     let days = diff / 86400;
     if days > STALE_WARNING_DAYS {
