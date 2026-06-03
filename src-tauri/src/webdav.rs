@@ -170,7 +170,7 @@ pub fn perform_sync(
         let remote_mtime_config = remote_listing
             .as_ref()
             .ok()
-            .and_then(|list| list.get(&format!("{}/config.sync.json", base)).copied())
+            .and_then(|list| list.get(&format!("{}/{}/config.sync.json", base, REMOTE_DIR)).copied())
             .unwrap_or(0);
 
         if local_mtime > remote_mtime_config {
@@ -180,18 +180,18 @@ pub fn perform_sync(
                 result.warnings.push(warn);
             }
             let content = std::fs::read_to_string(&sync_path).map_err(|e| format!("读取本地 sync 配置失败: {}", e))?;
-            let url = format!("{}/config.sync.json", base);
+            let url = format!("{}/{}/config.sync.json", base, REMOTE_DIR);
             match dav_put(&url, &config.username, password, &content) {
-                Ok(()) => result.uploaded.push("config.sync.json".to_string()),
+                Ok(()) => result.uploaded.push(format!("{}/config.sync.json", REMOTE_DIR)),
                 Err(e) => result.errors.push(format!("上传 config.sync.json 失败: {}", e)),
             }
         } else if remote_mtime_config > local_mtime {
             // Remote is newer, download
-            let url = format!("{}/config.sync.json", base);
+            let url = format!("{}/{}/config.sync.json", base, REMOTE_DIR);
             match dav_get(&url, &config.username, password) {
                 Ok(content) => {
                     std::fs::write(&sync_path, &content).map_err(|e| format!("写入本地 config.sync.json 失败: {}", e))?;
-                    result.downloaded.push("config.sync.json".to_string());
+                    result.downloaded.push(format!("{}/config.sync.json", REMOTE_DIR));
                 }
                 Err(e) => result.errors.push(format!("下载 config.sync.json 失败: {}", e)),
             }
@@ -208,17 +208,17 @@ pub fn perform_sync(
 
     // 5a. Upload/download matching profiles
     for (id, local_mtime) in &local_profiles {
-        let url = format!("{}/profiles/{}.txt", base, id);
+        let url = format!("{}/{}/{}.txt", base, PROFILES_REMOTE_DIR, id);
         let remote_mtime = remote_profiles.get(&url).copied().unwrap_or(0);
         if *local_mtime > remote_mtime {
             if let Some(warn) = check_staleness(*local_mtime, remote_mtime) {
-                result.warnings.push(format!("profiles/{}.txt: {}", id, warn));
+                result.warnings.push(format!("{}/{}.txt: {}", PROFILES_REMOTE_DIR, id, warn));
             }
             let path = profiles_dir.join(format!("{}.txt", id));
             if path.exists() {
                 let content = std::fs::read_to_string(&path).unwrap_or_default();
                 match dav_put(&url, &config.username, password, &content) {
-                    Ok(()) => result.uploaded.push(format!("profiles/{}.txt", id)),
+                    Ok(()) => result.uploaded.push(format!("{}/{}.txt", PROFILES_REMOTE_DIR, id)),
                     Err(e) => result.errors.push(format!("上传 {}.txt 失败: {}", id, e)),
                 }
             }
@@ -227,7 +227,7 @@ pub fn perform_sync(
                 Ok(content) => {
                     let path = profiles_dir.join(format!("{}.txt", id));
                     std::fs::write(&path, &content).map_err(|e| format!("写入本地 {}.txt 失败: {}", id, e)).ok();
-                    result.downloaded.push(format!("profiles/{}.txt", id));
+                    result.downloaded.push(format!("{}/{}.txt", PROFILES_REMOTE_DIR, id));
                 }
                 Err(e) => result.errors.push(format!("下载 {}.txt 失败: {}", id, e)),
             }
@@ -236,7 +236,7 @@ pub fn perform_sync(
 
     // 5b. Download remote-only profiles
     for (url, remote_mtime) in &remote_profiles {
-        if !url.contains("/profiles/") {
+        if !url.contains(&format!("/{}/", PROFILES_REMOTE_DIR)) {
             continue; // Only handle profiles in this pass
         }
         let filename = url.rsplit('/').next().unwrap_or("");
@@ -248,7 +248,7 @@ pub fn perform_sync(
             Ok(content) => {
                 let path = profiles_dir.join(filename);
                 std::fs::write(&path, &content).ok();
-                result.downloaded.push(format!("profiles/{}", filename));
+                result.downloaded.push(format!("{}/{}", PROFILES_REMOTE_DIR, filename));
             }
             Err(e) => result.errors.push(format!("下载 {} 失败: {}", filename, e)),
         }
@@ -257,7 +257,7 @@ pub fn perform_sync(
 
     // 5c. Delete remote profiles that don't exist locally
     for (url, _) in &remote_profiles {
-        if !url.contains("/profiles/") {
+        if !url.contains(&format!("/{}/", PROFILES_REMOTE_DIR)) {
             continue;
         }
         let filename = url.rsplit('/').next().unwrap_or("");

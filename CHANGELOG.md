@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-06-03
+
+### 🐛 修复 (Fixes)
+
+- **修 WebDAV 文件夹结构 bug(文件全错位到根目录)**:`perform_sync` 里 MKCOL 用了 `REMOTE_DIR` + `PROFILES_REMOTE_DIR` 常量(`<base>/hostly` + `<base>/hostly/profiles`),但 PUT/GET 文件时却**没用**,直接拼 `<base>/config.sync.json` 和 `<base>/profiles/<id>.txt`,文件全落到根目录。**修法**:所有 PUT/GET URL 都改成用常量拼(`{base}/{REMOTE_DIR}/config.sync.json` 和 `{base}/{PROFILES_REMOTE_DIR}/{id}.txt`),filter `url.contains("/profiles/")` 同步改成 `/hostly/profiles/`,display name 也改成 `hostly/...` 前缀。**注意**:旧版本已经写到根目录的 orphan 文件需要手动 WebDAV 客户端清理(`config.sync.json` + `profiles/<id>.txt` 在根目录的),新版本只往 `hostly/` 下面写。
+
 ## [1.2.4] - 2026-06-03
 
 ### 🐛 修复 (Fixes)
