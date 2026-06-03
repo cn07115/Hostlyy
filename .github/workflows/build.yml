@@ -203,6 +203,25 @@ jobs:
           [ -n "$LINUX_APPIMAGE" ] && ARGS+=(-b "$BASE/$(basename "$LINUX_APPIMAGE")")
           npx @tauri-apps/cli signer sign "${ARGS[@]}"
 
+      # signer sign 不填 notes 字段,这里把 release_notes.md 注入到 latest.json
+      # 这样客户端 updater.check() 拿到的 update.notes 就有内容,能显示更新日志
+      - name: Inject release notes into latest.json
+        if: always() && hashFiles('release_notes.md') != ''
+        run: |
+          # 找到 latest.json(signer sign 默认写在当前目录,但我们 cwd 是 repo 根)
+          LJ=$(find artifacts -name 'latest.json' | head -1)
+          if [ -z "$LJ" ]; then
+            echo "no latest.json found, skipping notes injection"
+            exit 0
+          fi
+          echo "Patching: $LJ"
+          # 用 jq 把 release_notes.md 作为 JSON 字符串塞到 notes 字段
+          NOTES=$(jq -Rs . < release_notes.md)
+          jq --argjson notes "$NOTES" '.notes = $notes' "$LJ" > "$LJ.tmp"
+          mv "$LJ.tmp" "$LJ"
+          echo "--- patched latest.json ---"
+          cat "$LJ"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
