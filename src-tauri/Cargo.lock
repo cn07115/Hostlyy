@@ -1492,6 +1492,7 @@ dependencies = [
  "clap",
  "keyring",
  "minreq",
+ "once_cell",
  "serde",
  "serde_json",
  "tauri",

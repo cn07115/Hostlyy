@@ -1087,10 +1087,13 @@ webdavSyncBtn.onclick = async () => {
     try {
         const result = await invoke('sync_now');
         await loadWebdavStatus();
+        const warnMsg = (result.warnings && result.warnings.length > 0)
+            ? ` | ⚠ ${result.warnings.join('; ')}`
+            : '';
         if (result.errors && result.errors.length > 0) {
-            showToast(`部分完成: ${result.summary()}`, 'error');
+            showToast(`部分完成: ${result.summary()}${warnMsg}`, 'error');
         } else {
-            showToast(`同步完成: ${result.summary()}`, 'success');
+            showToast(`同步完成: ${result.summary()}${warnMsg}`, 'success');
         }
     } catch(e) {
         await loadWebdavStatus();

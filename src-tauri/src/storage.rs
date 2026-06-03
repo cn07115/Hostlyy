@@ -475,7 +475,9 @@ pub fn create_profile(
     url: Option<String>,
     update_interval: Option<u64>
 ) -> Result<String, String> {
-    create_profile_internal(&Context::Tauri(&app), name, content, url, update_interval)
+    let id = create_profile_internal(&Context::Tauri(&app), name, content, url, update_interval)?;
+    crate::webdav::schedule_sync();
+    Ok(id)
 }
 
 pub fn create_profile_internal(
@@ -513,12 +515,13 @@ pub fn create_profile_internal(
 pub fn save_profile_content(app: AppHandle, id: String, content: String) -> Result<(), String> {
     let ctx = Context::Tauri(&app);
     save_profile_content_internal(&ctx, &id, &content)?;
-    
+
     // If this profile is active, re-apply config to system hosts
     let config = load_config_internal(&ctx)?;
     if config.profiles.iter().any(|p| p.id == id && p.active) {
         apply_config(app)?;
     }
+    crate::webdav::schedule_sync();
     Ok(())
 }
 
@@ -528,7 +531,9 @@ pub fn save_profile_content_internal(ctx: &Context, id: &str, content: &str) -> 
 
 #[tauri::command]
 pub fn delete_profile(app: AppHandle, id: String) -> Result<(), String> {
-    delete_profile_internal(&Context::Tauri(&app), &id)
+    delete_profile_internal(&Context::Tauri(&app), &id)?;
+    crate::webdav::schedule_sync();
+    Ok(())
 }
 
 pub fn delete_profile_internal(ctx: &Context, id: &str) -> Result<(), String> {
@@ -552,7 +557,9 @@ pub fn delete_profile_internal(ctx: &Context, id: &str) -> Result<(), String> {
 
 #[tauri::command]
 pub fn rename_profile(app: AppHandle, id: String, new_name: String) -> Result<(), String> {
-    rename_profile_internal(&Context::Tauri(&app), &id, new_name)
+    rename_profile_internal(&Context::Tauri(&app), &id, new_name)?;
+    crate::webdav::schedule_sync();
+    Ok(())
 }
 
 pub fn rename_profile_internal(ctx: &Context, id: &str, new_name: String) -> Result<(), String> {
@@ -573,7 +580,9 @@ pub fn rename_profile_internal(ctx: &Context, id: &str, new_name: String) -> Res
 #[tauri::command]
 pub fn toggle_profile_active(app: AppHandle, id: String) -> Result<(), String> {
     toggle_profile_active_internal(&Context::Tauri(&app), &id)?;
-    apply_config(app)
+    apply_config(app)?;
+    crate::webdav::schedule_sync();
+    Ok(())
 }
 
 pub fn toggle_profile_active_internal(ctx: &Context, id: &str) -> Result<(), String> {
@@ -609,7 +618,9 @@ pub fn toggle_profile_active_internal(ctx: &Context, id: &str) -> Result<(), Str
 #[tauri::command]
 pub fn set_multi_select(app: AppHandle, enable: bool) -> Result<(), String> {
     set_multi_select_internal(&Context::Tauri(&app), enable)?;
-    apply_config(app)
+    apply_config(app)?;
+    crate::webdav::schedule_sync();
+    Ok(())
 }
 
 pub fn set_multi_select_internal(ctx: &Context, enable: bool) -> Result<(), String> {
@@ -923,7 +934,7 @@ pub fn update_remote_config(
 ) -> Result<(), String> {
     let ctx = Context::Tauri(&app);
     let mut config = load_config_internal(&ctx)?;
-    
+
     if let Some(p) = config.profiles.iter_mut().find(|p| p.id == id) {
         p.url = url;
         p.update_interval = update_interval;
@@ -931,7 +942,9 @@ pub fn update_remote_config(
         return Err("Profile not found".to_string());
     }
 
-    save_config_internal(&ctx, &config)
+    save_config_internal(&ctx, &config)?;
+    crate::webdav::schedule_sync();
+    Ok(())
 }
 
 #[tauri::command]

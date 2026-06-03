@@ -23,6 +23,12 @@
 - 加 `keyring = "3"` crate(跨平台系统 keychain 抽象)
 - WebDAV HTTP 复用现成 `minreq`,PROPFIND / MKCOL / PUT / GET / DELETE 用 `Method::Custom` 实现
 
+### 🔄 自动同步 (Auto-sync)
+- **防抖 5s**:每次本地改动(创建/删除/重命名/切换激活/多选/更新 remote config)自动调度一次同步,5 秒内无新改动才真正推送。批量合并,避免高频小请求。
+- **启动拉取**:应用启动 3 秒后自动 pull 一次,确保打开时本地就是最新。
+- **周期拉取**:后台每 5 分钟自动 pull 一次,兜底多设备同步(防止有设备长期不在线错过更新)。
+- **30 天警告**:本地修改时间比远端新超过 30 天时,推送前会带上警告提示(防止离线过久覆盖别人近期改动),toast 会显示。
+
 ### 🐛 修复 (Fixes)
 - 升级 `tauri-plugin-autostart` 到 2.5.1(旧版本在 macOS 上偶发不生效)
 - 修复设置页 `.pane-title` 标题与其下方第一个 form-group 间距过小(从 20px → 28px + 10px 内边距)

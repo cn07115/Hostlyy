@@ -12,10 +12,15 @@
 
 use keyring::Entry;
 use minreq::Method;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use chrono::TimeZone;
+use tauri::Manager;
+use tokio::sync::Mutex;
+use tokio::time::interval;
 
 const KEYRING_SERVICE: &str = "hostly-webdav";
 const REMOTE_DIR: &str = "hostly";
@@ -43,6 +48,7 @@ pub struct SyncResult {
     pub downloaded: Vec<String>,
     pub deleted_remote: Vec<String>,
     pub errors: Vec<String>,
+    pub warnings: Vec<String>,
 }
 
 impl SyncResult {
@@ -138,6 +144,7 @@ pub fn perform_sync(
         downloaded: Vec::new(),
         deleted_remote: Vec::new(),
         errors: Vec::new(),
+        warnings: Vec::new(),
     };
 
     // 1. Ensure remote dir exists (MKCOL with parent)
@@ -167,6 +174,11 @@ pub fn perform_sync(
             .unwrap_or(0);
 
         if local_mtime > remote_mtime_config {
+            // Staleness check: if our local change is way newer than remote,
+            // we might be overwriting someone else's fresher work.
+            if let Some(warn) = check_staleness(local_mtime, remote_mtime_config) {
+                result.warnings.push(warn);
+            }
             let content = std::fs::read_to_string(&sync_path).map_err(|e| format!("读取本地 sync 配置失败: {}", e))?;
             let url = format!("{}/config.sync.json", base);
             match dav_put(&url, &config.username, password, &content) {
@@ -199,6 +211,9 @@ pub fn perform_sync(
         let url = format!("{}/profiles/{}.txt", base, id);
         let remote_mtime = remote_profiles.get(&url).copied().unwrap_or(0);
         if *local_mtime > remote_mtime {
+            if let Some(warn) = check_staleness(*local_mtime, remote_mtime) {
+                result.warnings.push(format!("profiles/{}.txt: {}", id, warn));
+            }
             let path = profiles_dir.join(format!("{}.txt", id));
             if path.exists() {
                 let content = std::fs::read_to_string(&path).unwrap_or_default();
@@ -464,4 +479,146 @@ pub fn now_iso() -> String {
     chrono::Local.timestamp_opt(secs, 0).single()
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_default()
+}
+
+// ============================ Auto-sync scheduler ============================
+// Reactive debounce: every local mutation calls `schedule_sync`, which sets a
+// 5-second deadline. A single background task wakes up every 500ms, checks
+// the deadline, and runs `sync_now` when it expires. This batches bursts of
+// rapid changes (e.g., typing in the editor) into one sync.
+
+pub const DEBOUNCE_SECS: u64 = 5;
+const TICK_MS: u64 = 500;
+
+#[derive(Clone)]
+pub struct SyncScheduler {
+    deadline: Arc<Mutex<Option<Instant>>>,
+    app: tauri::AppHandle,
+}
+
+/// Global singleton — set once in `setup`, used by mutation commands via
+/// `schedule_sync()`. Lives for the lifetime of the app.
+static SCHEDULER: OnceCell<SyncScheduler> = OnceCell::new();
+
+pub fn init_scheduler(scheduler: SyncScheduler) {
+    let _ = SCHEDULER.set(scheduler);
+}
+
+/// Called from mutation commands (create_profile, save_content, etc.)
+/// to mark "we want a sync". The background loop fires when the
+/// debounce window elapses.
+pub fn schedule_sync() {
+    if let Some(s) = SCHEDULER.get() {
+        s.schedule();
+    }
+}
+
+/// Run a full sync: load local config, perform WebDAV sync, update
+/// status fields in `config.local.json`. Returns the sync result.
+/// Used by:
+///  - the `sync_now` Tauri command (manual button)
+///  - the scheduler loop (debounced push after mutations)
+///  - the startup pull task
+///  - the periodic background pull task
+pub fn sync_now_internal(app: &tauri::AppHandle) -> Result<SyncResult, String> {
+    let ctx = crate::storage::Context::Tauri(app);
+    let mut local = crate::storage::load_local_config_internal(&ctx)?;
+    let url = local.webdav_url.clone().ok_or("WebDAV URL 未配置")?;
+    let username = local.webdav_username.clone().ok_or("WebDAV 用户名未配置")?;
+    let password = load_credentials(&username)?;
+    let cfg = WebDavConfig { url, username };
+
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let result = perform_sync(&app_dir, &cfg, &password);
+
+    // Update status fields regardless of success
+    match &result {
+        Ok(r) => {
+            local.webdav_last_sync = Some(now_iso());
+            if r.errors.is_empty() {
+                local.webdav_last_status = Some("ok".to_string());
+            } else {
+                local.webdav_last_status = Some(format!("partial: {}", r.errors.len()));
+            }
+        }
+        Err(e) => {
+            local.webdav_last_sync = Some(now_iso());
+            local.webdav_last_status = Some(format!("error: {}", e));
+        }
+    }
+    let _ = crate::storage::save_local_config_internal(&ctx, &local);
+
+    result
+}
+
+impl SyncScheduler {
+    pub fn new(app: tauri::AppHandle) -> Self {
+        Self {
+            deadline: Arc::new(Mutex::new(None)),
+            app,
+        }
+    }
+
+    /// Mark "we want to sync". The actual sync runs DEBOUNCE_SECS later.
+    pub fn schedule(&self) {
+        let new_deadline = Instant::now() + Duration::from_secs(DEBOUNCE_SECS);
+        if let Ok(mut d) = self.deadline.try_lock() {
+            *d = Some(new_deadline);
+        }
+    }
+
+    /// Force an immediate sync (skip the debounce). Used at app startup
+    /// and by the periodic background pull.
+    pub async fn run_immediate(&self) -> Result<SyncResult, String> {
+        sync_now_internal(&self.app)
+    }
+
+    /// Long-running task: every TICK_MS, check the deadline. If it's
+    /// elapsed, run a sync.
+    pub async fn run_loop(self) {
+        let mut tick = interval(Duration::from_millis(TICK_MS));
+        loop {
+            tick.tick().await;
+            let should_fire = {
+                let mut d = match self.deadline.try_lock() {
+                    Ok(g) => g,
+                    Err(_) => continue, // Skip this tick if mutex is busy
+                };
+                if let Some(deadline) = *d {
+                    if Instant::now() >= deadline {
+                        *d = None;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            };
+            if should_fire {
+                let result = sync_now_internal(&self.app);
+                if let Err(e) = &result {
+                    eprintln!("Scheduled sync failed: {}", e);
+                }
+            }
+        }
+    }
+}
+
+/// Warn the user if their local changes are stale (older than ~30 days)
+/// relative to the remote. With last-write-wins, stale local changes that
+/// silently push would clobber fresher remote work.
+const STALE_WARNING_DAYS: i64 = 30;
+
+pub fn check_staleness(local_mtime: i64, remote_mtime: i64) -> Option<String> {
+    let diff = local_mtime - remote_mtime;
+    let days = diff / 86400;
+    if days > STALE_WARNING_DAYS {
+        Some(format!(
+            "本地修改时间比远端新 {} 天,推送可能覆盖他人近期改动",
+            days
+        ))
+    } else {
+        None
+    }
 }

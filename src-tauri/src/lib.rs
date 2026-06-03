@@ -110,6 +110,39 @@ pub fn run() {
                 }
             });
 
+            // === WebDAV sync scheduler ===
+            // - Reactive debounce: local mutations call schedule_sync, which sets a
+            //   5s deadline. The scheduler loop below fires the sync when the
+            //   deadline elapses.
+            // - Startup pull: 3s after launch, do an initial pull so the device
+            //   starts with the latest remote state.
+            // - Periodic pull: every 5 minutes, re-pull to catch any missed changes.
+            let scheduler = webdav::SyncScheduler::new(app.handle().clone());
+            webdav::init_scheduler(scheduler.clone());
+            // Run the debounce loop forever
+            let sched_for_loop = scheduler.clone();
+            tauri::async_runtime::spawn(async move {
+                sched_for_loop.run_loop().await;
+            });
+            // Startup pull: 3s delay then pull
+            let sched_for_startup = scheduler.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                if let Err(e) = sched_for_startup.run_immediate().await {
+                    eprintln!("Startup sync failed: {}", e);
+                }
+            });
+            // Periodic pull: every 5 min
+            let sched_for_periodic = scheduler.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
+                    if let Err(e) = sched_for_periodic.run_immediate().await {
+                        eprintln!("Periodic sync failed: {}", e);
+                    }
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -206,34 +239,7 @@ fn test_webdav_connection(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 fn sync_now(app: tauri::AppHandle) -> Result<webdav::SyncResult, String> {
-    let ctx = storage::Context::Tauri(&app);
-    let mut local = storage::load_local_config_internal(&ctx)?;
-    let url = local.webdav_url.clone().ok_or("WebDAV URL 未配置")?;
-    let username = local.webdav_username.clone().ok_or("WebDAV 用户名未配置")?;
-    let password = webdav::load_credentials(&username)?;
-    let cfg = webdav::WebDavConfig { url, username };
-
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let result = webdav::perform_sync(&app_dir, &cfg, &password);
-
-    // Update status regardless of success
-    match &result {
-        Ok(r) => {
-            local.webdav_last_sync = Some(webdav::now_iso());
-            if r.errors.is_empty() {
-                local.webdav_last_status = Some("ok".to_string());
-            } else {
-                local.webdav_last_status = Some(format!("partial: {}", r.errors.len()));
-            }
-        }
-        Err(e) => {
-            local.webdav_last_sync = Some(webdav::now_iso());
-            local.webdav_last_status = Some(format!("error: {}", e));
-        }
-    }
-    let _ = storage::save_local_config_internal(&ctx, &local);
-
-    result
+    webdav::sync_now_internal(&app)
 }
 
 #[tauri::command]
