@@ -19,6 +19,9 @@
 - 应用名 `Hostly` → `Hostlyy`(窗口标题、托盘 tooltip、sidebar 标题、关于页、GitHub release 标题)
 - 窗口标题增加版本号显示:`Hostlyy v1.3.0`(用 `{{version}}` 模板,bump 版本时自动同步)
 
+### 修复 (Fixed)
+- **「跟随系统」模式不跟随 OS 切换**:WebView2 上 `WebviewWindow.onThemeChanged` 偶尔不触发,加 `matchMedia('(prefers-color-scheme: light)').addEventListener('change', ...)` 兜底,任何 webview 都能跟 OS 实时切深浅
+
 ## [1.2.8] - 2026-06-04
 
 （无功能变更）
