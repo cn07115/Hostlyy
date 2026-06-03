@@ -1,5 +1,31 @@
 # 更新日志 (Changelog)
 
+## [Unreleased]
+
+## [1.1.0] - 2026-06-03
+
+### 🚀 新增功能 (Features)
+- **跨平台 Auto-Elevation (提权)**
+  - Windows: 进程启动时检查 `IsUserAnAdmin`,非管理员自动用 `ShellExecuteExW` + `runas` 提权重启(**原 `net session` 子进程方案被替换,启动时不再有 cmd 窗口一闪而过**)。
+  - macOS: `osascript -e 'do shell script ... with administrator privileges'` 触发系统原生认证框。
+  - Linux: 优先 `pkexec`(走 polkit 弹 GTK/Qt 认证框),fallback 到 `sudo`。
+- **跨平台 Auto-Start (开机自启)**
+  - 改用 `tauri-plugin-autostart` 替代原作者手写的 Windows 注册表实现。
+  - Windows: HKCU 注册表 / macOS: `~/Library/LaunchAgents` plist / Linux: `~/.config/autostart` .desktop。
+  - 原作者的 `autostart.rs` 只 Windows 有效,现在三平台都跑。
+- **关闭按钮修复**
+  - 之前系统 `ask()` 弹窗在 Tauri 2 上会静默失败,自定义弹窗又因 CSS 缺 `#close-confirm-overlay` 选择器不显示,体感"关闭按钮无反应"。
+  - 现在点 X 直接显示应用内居中弹窗(带"退出程序 / 最小化到托盘 / 记住本次选择"),不再依赖系统弹窗。
+- **GitHub Actions 多平台 CI**
+  - 新增 `.github/workflows/build.yml`:Windows (msvc) + macOS (arm64 + x64) + Linux 矩阵并行构建,产物作为 Artifacts 上传 14 天。
+  - 删除原作者 `.github/workflows/publish.yml`(每次 push 删旧 release,对 fork 没意义)。
+
+### 🐛 修复 (Fixes)
+- 启动时 cmd 窗口一闪而过 —— 根因是 `relaunch_as_admin_if_needed` 调了 `net session` 子进程,从 `windows_subsystem` 父进程 spawn 控制台子系统子进程会临时分配控制台。
+- 关闭按钮"无反应" —— 根因是事件监听走 `tauri-plugin-dialog::ask()` 系统弹窗失败,fallback 到 `showCloseDialog()` 自定义弹窗但 CSS 缺 `.modal-overlay` 选择器导致不显示。
+- macOS / Linux 自启动按钮无效 —— 原 `autostart.rs` 只 Windows 工作(`#[cfg(target_os = "windows")]`),其它平台返回 `false`。
+- 补回 `tray-icon` feature 和 `tauri-plugin-autostart` 依赖 —— 原作者 `Cargo.toml` 漏了,README 吹了有托盘但 feature 没开,本地工作区手动修过但 git push 时漏同步。
+
 ## [Unreleased] - 2026-01-14
 
 ### ✨ 新增功能 (Features)
