@@ -97,8 +97,9 @@ jobs:
           Copy-Item src-tauri/target/release/hostly.exe -Destination artifacts/hostly-gui-elevated-${{ matrix.target }}.exe
           Copy-Item src-tauri/target/release/hostly-cli-elevated.exe -Destination artifacts/hostly-cli-elevated-${{ matrix.target }}.exe
           Copy-Item src-tauri/target/release/hostly-core.exe -Destination artifacts/hostly-core-${{ matrix.target }}.exe
+          # Pull in both MSI and NSIS installers from the bundle output
           Get-ChildItem src-tauri/target/release/bundle -Recurse -File |
-            Where-Object { $_.Extension -in '.msi' } |
+            Where-Object { $_.Extension -in '.msi' -or $_.Name -like '*-setup.exe' } |
             Copy-Item -Destination artifacts/
 
       - name: Stage artifacts (macOS)
