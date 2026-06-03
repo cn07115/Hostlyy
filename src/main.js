@@ -948,21 +948,36 @@ document.getElementById('window-size-select').onchange = (e) => {
 
 async function initSystemSettings() {
     try {
-        const [autoStart, closeBehavior, rememberClose] = await Promise.all([
+        const [autoStart, closeBehavior, rememberClose, syncStatus] = await Promise.all([
             invoke('get_auto_start'),
             invoke('get_close_behavior'),
-            invoke('get_remember_close_choice')
+            invoke('get_remember_close_choice'),
+            invoke('get_sync_status').catch(() => null)
         ]);
-        
+
         document.getElementById('auto-start-checkbox').checked = autoStart;
-        
+
         const closeRadios = document.getElementsByName('close-behavior');
         closeRadios.forEach(r => {
             r.checked = r.value === closeBehavior;
         });
-        
+
         document.getElementById('remember-close-checkbox').checked = rememberClose;
         updateRememberGroupVisibility(closeBehavior);
+
+        if (syncStatus) {
+            if (webdavUrlEl) webdavUrlEl.value = syncStatus.url || '';
+            if (webdavUsernameEl) webdavUsernameEl.value = syncStatus.username || '';
+            // Password is intentionally left empty (we don't read from keychain)
+            if (webdavLastSyncEl) {
+                webdavLastSyncEl.textContent = formatSyncTime(syncStatus.last_sync);
+                const st = formatSyncStatus(syncStatus.last_status);
+                if (webdavLastStatusEl) {
+                    webdavLastStatusEl.textContent = st.text;
+                    webdavLastStatusEl.style.color = st.color;
+                }
+            }
+        }
     } catch(e) { console.error('Failed to load system settings:', e); }
 }
 
@@ -972,6 +987,119 @@ function updateRememberGroupVisibility(closeBehavior) {
         group.classList.toggle('hidden', closeBehavior === 'exit');
     }
 }
+
+// =============== WebDAV Sync UI ===============
+
+const webdavUrlEl = document.getElementById('webdav-url');
+const webdavUsernameEl = document.getElementById('webdav-username');
+const webdavPasswordEl = document.getElementById('webdav-password');
+const webdavSaveBtn = document.getElementById('webdav-save-btn');
+const webdavTestBtn = document.getElementById('webdav-test-btn');
+const webdavSyncBtn = document.getElementById('webdav-sync-btn');
+const webdavLastSyncEl = document.getElementById('webdav-last-sync');
+const webdavLastStatusEl = document.getElementById('webdav-last-status');
+
+function formatSyncTime(iso) {
+    if (!iso) return '从未';
+    try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return iso;
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    } catch { return iso; }
+}
+
+function formatSyncStatus(status) {
+    if (!status) return { text: '未配置', color: 'var(--text-muted)' };
+    if (status === 'ok') return { text: '成功', color: '#3fb950' };
+    if (status.startsWith('partial')) return { text: status, color: '#d29922' };
+    if (status.startsWith('error')) return { text: status, color: '#f85149' };
+    return { text: status, color: 'var(--text-dim)' };
+}
+
+async function loadWebdavStatus() {
+    try {
+        const s = await invoke('get_sync_status');
+        webdavLastSyncEl.textContent = formatSyncTime(s.last_sync);
+        const st = formatSyncStatus(s.last_status);
+        webdavLastStatusEl.textContent = st.text;
+        webdavLastStatusEl.style.color = st.color;
+    } catch(e) {
+        console.error('Failed to load sync status:', e);
+    }
+}
+
+webdavSaveBtn.onclick = async () => {
+    const url = (webdavUrlEl.value || '').trim();
+    const username = (webdavUsernameEl.value || '').trim();
+    const password = webdavPasswordEl.value || '';
+    if (url && !url.match(/^https?:\/\//)) {
+        showToast('WebDAV 地址必须以 http:// 或 https:// 开头', 'error');
+        return;
+    }
+    if (url && !username) {
+        showToast('请填写用户名', 'error');
+        return;
+    }
+    try {
+        await invoke('save_webdav_config', { url, username, password });
+        webdavPasswordEl.value = ''; // Don't keep password in DOM
+        showToast('WebDAV 配置已保存(密码已存到系统 keychain)', 'success');
+        await loadWebdavStatus();
+    } catch(e) {
+        showToast(`保存失败: ${e}`, 'error');
+    }
+};
+
+webdavTestBtn.onclick = async () => {
+    const url = (webdavUrlEl.value || '').trim();
+    const username = (webdavUsernameEl.value || '').trim();
+    if (!url || !username) {
+        showToast('请先填写 WebDAV 地址和用户名', 'error');
+        return;
+    }
+    // Save first (so backend has the credentials), then test
+    try {
+        const password = webdavPasswordEl.value || '';
+        await invoke('save_webdav_config', { url, username, password });
+        webdavPasswordEl.value = '';
+    } catch(e) {
+        showToast(`保存失败: ${e}`, 'error');
+        return;
+    }
+    webdavTestBtn.disabled = true;
+    webdavTestBtn.textContent = '测试中...';
+    try {
+        const result = await invoke('test_webdav_connection');
+        showToast(result, 'success');
+    } catch(e) {
+        showToast(`连接失败: ${e}`, 'error');
+    } finally {
+        webdavTestBtn.disabled = false;
+        webdavTestBtn.textContent = '测试连接';
+    }
+};
+
+webdavSyncBtn.onclick = async () => {
+    webdavSyncBtn.disabled = true;
+    const originalText = webdavSyncBtn.textContent;
+    webdavSyncBtn.textContent = '同步中...';
+    try {
+        const result = await invoke('sync_now');
+        await loadWebdavStatus();
+        if (result.errors && result.errors.length > 0) {
+            showToast(`部分完成: ${result.summary()}`, 'error');
+        } else {
+            showToast(`同步完成: ${result.summary()}`, 'success');
+        }
+    } catch(e) {
+        await loadWebdavStatus();
+        showToast(`同步失败: ${e}`, 'error');
+    } finally {
+        webdavSyncBtn.disabled = false;
+        webdavSyncBtn.textContent = originalText;
+    }
+};
 
 document.getElementById('auto-start-checkbox').onchange = async (e) => {
     try {

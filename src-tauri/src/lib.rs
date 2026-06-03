@@ -3,6 +3,7 @@ pub mod storage;
 pub mod cli;
 pub mod elevation;
 pub mod autostart;
+pub mod webdav;
 
 #[cfg(target_os = "windows")]
 use window_vibrancy::apply_mica;
@@ -143,6 +144,10 @@ pub fn run() {
             storage::get_close_behavior,
             storage::save_remember_close_choice,
             storage::get_remember_close_choice,
+            save_webdav_config,
+            test_webdav_connection,
+            sync_now,
+            get_sync_status,
             show_main_window,
             hide_to_tray,
             exit_app,
@@ -165,4 +170,82 @@ fn hide_to_tray(window: tauri::Window) {
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+// ============================ WebDAV Sync ============================
+
+#[tauri::command]
+fn save_webdav_config(
+    app: tauri::AppHandle,
+    url: String,
+    username: String,
+    password: String,
+) -> Result<(), String> {
+    // Persist password in OS keychain
+    webdav::save_credentials(&username, &password)?;
+    // Persist URL + username in LocalConfig
+    let ctx = storage::Context::Tauri(&app);
+    let mut local = storage::load_local_config_internal(&ctx)?;
+    local.webdav_url = if url.is_empty() { None } else { Some(url) };
+    local.webdav_username = if username.is_empty() { None } else { Some(username) };
+    // Clear status on config change
+    local.webdav_last_status = None;
+    storage::save_local_config_internal(&ctx, &local)
+}
+
+#[tauri::command]
+fn test_webdav_connection(app: tauri::AppHandle) -> Result<String, String> {
+    let ctx = storage::Context::Tauri(&app);
+    let local = storage::load_local_config_internal(&ctx)?;
+    let url = local.webdav_url.ok_or("WebDAV URL 未配置")?;
+    let username = local.webdav_username.ok_or("WebDAV 用户名未配置")?;
+    let password = webdav::load_credentials(&username)?;
+    let cfg = webdav::WebDavConfig { url, username };
+    webdav::test_connection(&cfg, &password)
+}
+
+#[tauri::command]
+fn sync_now(app: tauri::AppHandle) -> Result<webdav::SyncResult, String> {
+    let ctx = storage::Context::Tauri(&app);
+    let mut local = storage::load_local_config_internal(&ctx)?;
+    let url = local.webdav_url.clone().ok_or("WebDAV URL 未配置")?;
+    let username = local.webdav_username.clone().ok_or("WebDAV 用户名未配置")?;
+    let password = webdav::load_credentials(&username)?;
+    let cfg = webdav::WebDavConfig { url, username };
+
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let result = webdav::perform_sync(&app_dir, &cfg, &password);
+
+    // Update status regardless of success
+    match &result {
+        Ok(r) => {
+            local.webdav_last_sync = Some(webdav::now_iso());
+            if r.errors.is_empty() {
+                local.webdav_last_status = Some("ok".to_string());
+            } else {
+                local.webdav_last_status = Some(format!("partial: {}", r.errors.len()));
+            }
+        }
+        Err(e) => {
+            local.webdav_last_sync = Some(webdav::now_iso());
+            local.webdav_last_status = Some(format!("error: {}", e));
+        }
+    }
+    let _ = storage::save_local_config_internal(&ctx, &local);
+
+    result
+}
+
+#[tauri::command]
+fn get_sync_status(app: tauri::AppHandle) -> Result<webdav::SyncStatus, String> {
+    let ctx = storage::Context::Tauri(&app);
+    let local = storage::load_local_config_internal(&ctx)?;
+    Ok(webdav::SyncStatus {
+        configured: local.webdav_url.is_some() && local.webdav_username.is_some(),
+        last_sync: local.webdav_last_sync.clone(),
+        last_status: local.webdav_last_status.clone(),
+        last_message: None,
+        username: local.webdav_username.clone(),
+        url: local.webdav_url.clone(),
+    })
 }

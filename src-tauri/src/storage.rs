@@ -33,10 +33,148 @@ pub struct AppConfig {
     pub close_behavior: String,
     #[serde(default)]
     pub remember_close_choice: bool,
+    // WebDAV sync fields (kept here so AppConfig is still a complete view)
+    #[serde(default)]
+    pub webdav_url: Option<String>,
+    #[serde(default)]
+    pub webdav_username: Option<String>,
+    #[serde(default)]
+    pub webdav_last_sync: Option<String>,
+    /// Format version of the on-disk files. 1 = old single config.json,
+    /// 2 = split (config.local.json + config.sync.json). Defaults to 2
+    /// when absent.
+    #[serde(default = "default_config_version")]
+    pub config_version: u32,
 }
 
 fn default_close_behavior() -> String {
     "exit".to_string()
+}
+
+fn default_config_version() -> u32 {
+    2
+}
+
+/// Per-device, **NOT** synced via WebDAV. Stored in `config.local.json`.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct LocalConfig {
+    pub theme: Option<String>,
+    pub window_mode: Option<String>,
+    pub window_width: Option<f64>,
+    pub window_height: Option<f64>,
+    pub sidebar_width: Option<f64>,
+    #[serde(default)]
+    pub auto_start: bool,
+    #[serde(default = "default_close_behavior")]
+    pub close_behavior: String,
+    #[serde(default)]
+    pub remember_close_choice: bool,
+    #[serde(default)]
+    pub webdav_url: Option<String>,
+    #[serde(default)]
+    pub webdav_username: Option<String>,
+    #[serde(default)]
+    pub webdav_last_sync: Option<String>,
+    /// Last sync operation's status: "ok" / "error: ..." / "never"
+    #[serde(default)]
+    pub webdav_last_status: Option<String>,
+}
+
+impl From<&AppConfig> for LocalConfig {
+    fn from(c: &AppConfig) -> Self {
+        Self {
+            theme: c.theme.clone(),
+            window_mode: c.window_mode.clone(),
+            window_width: c.window_width,
+            window_height: c.window_height,
+            sidebar_width: c.sidebar_width,
+            auto_start: c.auto_start,
+            close_behavior: c.close_behavior.clone(),
+            remember_close_choice: c.remember_close_choice,
+            webdav_url: c.webdav_url.clone(),
+            webdav_username: c.webdav_username.clone(),
+            webdav_last_sync: c.webdav_last_sync.clone(),
+            webdav_last_status: None,
+        }
+    }
+}
+
+/// Cross-device, **synced** via WebDAV. Stored in `config.sync.json`.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct SyncConfig {
+    pub multi_select: bool,
+    pub profiles: Vec<ProfileMetadata>,
+    pub active_profile_ids: Vec<String>,
+}
+
+impl From<&AppConfig> for SyncConfig {
+    fn from(c: &AppConfig) -> Self {
+        Self {
+            multi_select: c.multi_select,
+            profiles: c.profiles.clone(),
+            active_profile_ids: c.active_profile_ids.clone(),
+        }
+    }
+}
+
+impl From<&LocalConfig> for AppConfig {
+    fn from(l: &LocalConfig) -> Self {
+        Self {
+            multi_select: false,
+            theme: l.theme.clone(),
+            window_mode: l.window_mode.clone(),
+            window_width: l.window_width,
+            window_height: l.window_height,
+            sidebar_width: l.sidebar_width,
+            profiles: Vec::new(),
+            active_profile_ids: Vec::new(),
+            auto_start: l.auto_start,
+            close_behavior: l.close_behavior.clone(),
+            remember_close_choice: l.remember_close_choice,
+            webdav_url: l.webdav_url.clone(),
+            webdav_username: l.webdav_username.clone(),
+            webdav_last_sync: l.webdav_last_sync.clone(),
+            config_version: 2,
+        }
+    }
+}
+
+impl From<&SyncConfig> for AppConfig {
+    fn from(s: &SyncConfig) -> Self {
+        Self {
+            multi_select: s.multi_select,
+            theme: None,
+            window_mode: None,
+            window_width: None,
+            window_height: None,
+            sidebar_width: None,
+            profiles: s.profiles.clone(),
+            active_profile_ids: s.active_profile_ids.clone(),
+            auto_start: false,
+            close_behavior: "exit".to_string(),
+            remember_close_choice: false,
+            webdav_url: None,
+            webdav_username: None,
+            webdav_last_sync: None,
+            config_version: 2,
+        }
+    }
+}
+
+impl AppConfig {
+    /// Merge LocalConfig + SyncConfig into a full AppConfig (used for UI consumption).
+    pub fn merge(local: &LocalConfig, sync: &SyncConfig) -> Self {
+        let mut c = AppConfig::from(local);
+        c.multi_select = sync.multi_select;
+        c.profiles = sync.profiles.clone();
+        c.active_profile_ids = sync.active_profile_ids.clone();
+        c
+    }
+
+    /// Split AppConfig into its local and sync parts (used at save time).
+    pub fn split(&self) -> (LocalConfig, SyncConfig) {
+        (LocalConfig::from(self), SyncConfig::from(self))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -94,6 +232,14 @@ fn get_config_path(ctx: &Context) -> Result<PathBuf, String> {
     Ok(ctx.get_app_dir()?.join("config.json"))
 }
 
+fn get_local_config_path(ctx: &Context) -> Result<PathBuf, String> {
+    Ok(ctx.get_app_dir()?.join("config.local.json"))
+}
+
+fn get_sync_config_path(ctx: &Context) -> Result<PathBuf, String> {
+    Ok(ctx.get_app_dir()?.join("config.sync.json"))
+}
+
 fn get_common_path(ctx: &Context) -> Result<PathBuf, String> {
     Ok(ctx.get_app_dir()?.join("common.txt"))
 }
@@ -104,63 +250,126 @@ pub fn load_config(app: AppHandle) -> Result<AppConfig, String> {
 }
 
 pub fn load_config_internal(ctx: &Context) -> Result<AppConfig, String> {
-    let path = get_config_path(ctx)?;
+    let local_path = get_local_config_path(ctx)?;
+    let sync_path = get_sync_config_path(ctx)?;
+    let legacy_path = get_config_path(ctx)?;
+
+    // New format: both files exist — load and merge
+    if local_path.exists() && sync_path.exists() {
+        let local_content = fs::read_to_string(&local_path).map_err(|e| e.to_string())?;
+        let sync_content = fs::read_to_string(&sync_path).map_err(|e| e.to_string())?;
+        let local: LocalConfig = serde_json::from_str(&local_content).map_err(|e| e.to_string())?;
+        let sync: SyncConfig = serde_json::from_str(&sync_content).map_err(|e| e.to_string())?;
+        return Ok(AppConfig::merge(&local, &sync));
+    }
+
+    // Migration: old single config.json exists — load, split, write new files
+    if legacy_path.exists() {
+        let content = fs::read_to_string(&legacy_path).map_err(|e| e.to_string())?;
+        let old: AppConfig = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+        let (local, sync) = old.split();
+        save_local_config_internal(ctx, &local)?;
+        save_sync_config_internal(ctx, &sync)?;
+        // Keep legacy file as backup for one release, but mark migrated.
+        // Don't delete it — safer in case of corruption.
+        return Ok(old);
+    }
+
+    // First run: create defaults in new format
+    create_default_config(ctx)
+}
+
+pub fn save_config_internal(ctx: &Context, config: &AppConfig) -> Result<(), String> {
+    let (local, sync) = config.split();
+    save_local_config_internal(ctx, &local)?;
+    save_sync_config_internal(ctx, &sync)?;
+    Ok(())
+}
+
+pub fn save_local_config_internal(ctx: &Context, local: &LocalConfig) -> Result<(), String> {
+    let path = get_local_config_path(ctx)?;
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+    }
+    let content = serde_json::to_string_pretty(local).map_err(|e| e.to_string())?;
+    fs::write(path, content).map_err(|e| e.to_string())
+}
+
+pub fn save_sync_config_internal(ctx: &Context, sync: &SyncConfig) -> Result<(), String> {
+    let path = get_sync_config_path(ctx)?;
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+    }
+    let content = serde_json::to_string_pretty(sync).map_err(|e| e.to_string())?;
+    fs::write(path, content).map_err(|e| e.to_string())
+}
+
+pub fn load_local_config_internal(ctx: &Context) -> Result<LocalConfig, String> {
+    let path = get_local_config_path(ctx)?;
     if !path.exists() {
-        // First Run: Create defaults
-        let mut config = AppConfig::default();
-        config.multi_select = false;
-        config.auto_start = false;
-        config.close_behavior = "exit".to_string();
-        config.remember_close_choice = false;
-        
-        let defaults = vec!["Dev", "Test", "Prod"];
-        
-        // 1. Auto-backup System Hosts
-        let sys_id = Uuid::new_v4().to_string();
-        let sys_hosts_content = crate::hosts::get_system_hosts();
-        let sys_content = sys_hosts_content.unwrap_or_else(|_| "# Backup failed".to_string());
-        
-        save_profile_file_internal(ctx, &sys_id, &sys_content)?;
-        config.profiles.push(ProfileMetadata {
-            id: sys_id,
-            name: "系统hosts备份".to_string(),
+        return Ok(LocalConfig::default());
+    }
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+pub fn load_sync_config_internal(ctx: &Context) -> Result<SyncConfig, String> {
+    let path = get_sync_config_path(ctx)?;
+    if !path.exists() {
+        return Ok(SyncConfig::default());
+    }
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+fn create_default_config(ctx: &Context) -> Result<AppConfig, String> {
+    let mut sync = SyncConfig::default();
+    sync.multi_select = false;
+    let mut local = LocalConfig::default();
+    local.auto_start = false;
+    local.close_behavior = "exit".to_string();
+    local.remember_close_choice = false;
+
+    let defaults = vec!["Dev", "Test", "Prod"];
+
+    // 1. Auto-backup System Hosts
+    let sys_id = Uuid::new_v4().to_string();
+    let sys_hosts_content = crate::hosts::get_system_hosts();
+    let sys_content = sys_hosts_content.unwrap_or_else(|_| "# Backup failed".to_string());
+
+    save_profile_file_internal(ctx, &sys_id, &sys_content)?;
+    sync.profiles.push(ProfileMetadata {
+        id: sys_id,
+        name: "系统hosts备份".to_string(),
+        active: false,
+        url: None,
+        last_update: None,
+        update_interval: None,
+    });
+
+    // 2. Default Envs
+    for name in defaults {
+        let id = Uuid::new_v4().to_string();
+        save_profile_file_internal(ctx, &id, "# New Environment\n")?;
+        sync.profiles.push(ProfileMetadata {
+            id,
+            name: name.to_string(),
             active: false,
             url: None,
             last_update: None,
             update_interval: None,
         });
-
-        // 2. Default Envs
-        for name in defaults {
-             let id = Uuid::new_v4().to_string();
-             save_profile_file_internal(ctx, &id, "# New Environment\n")?;
-             config.profiles.push(ProfileMetadata {
-                 id,
-                 name: name.to_string(),
-                 active: false,
-                 url: None,
-                 last_update: None,
-                 update_interval: None,
-             });
-        }
-        
-        save_config_internal(ctx, &config)?;
-        return Ok(config);
     }
-    
-    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&content).map_err(|e| e.to_string())
-}
 
-pub fn save_config_internal(ctx: &Context, config: &AppConfig) -> Result<(), String> {
-    let path = get_config_path(ctx)?;
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-    }
-    let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    fs::write(path, content).map_err(|e| e.to_string())
+    // Save new format
+    save_local_config_internal(ctx, &local)?;
+    save_sync_config_internal(ctx, &sync)?;
+
+    Ok(AppConfig::merge(&local, &sync))
 }
 
 pub fn save_profile_file_internal(ctx: &Context, id: &str, content: &str) -> Result<(), String> {

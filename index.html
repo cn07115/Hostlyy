@@ -250,6 +250,38 @@ https://example2.com/hosts2.txt" rows="3"></textarea>
                         </label>
                         <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">勾选后下次关闭窗口时将按本次设定执行，不再弹出确认</p>
                     </div>
+
+                    <h4 class="pane-title" style="margin-top: 24px;">云端同步 (WebDAV)</h4>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
+                        通过 WebDAV 在多设备间同步 hosts 配置。系统设置(主题/窗口大小等)不同步,只同步 hosts 内容。
+                    </p>
+                    <div class="form-group">
+                        <label>服务器地址</label>
+                        <input type="url" id="webdav-url" placeholder="https://dav.example.com/hostly/" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" id="webdav-username" placeholder="webdav 用户名" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="webdav-password" placeholder="留空表示不修改现有密码" autocomplete="new-password">
+                        <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                            密码存储于系统 keychain(Windows Credential Manager / macOS Keychain / Linux Secret Service)
+                        </p>
+                    </div>
+                    <div class="form-group" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button id="webdav-save-btn" class="secondary">保存配置</button>
+                        <button id="webdav-test-btn" class="secondary">测试连接</button>
+                        <button id="webdav-sync-btn" class="primary">立即同步</button>
+                    </div>
+                    <div class="form-group">
+                        <label>同步状态</label>
+                        <div id="webdav-status-line" style="font-size: 13px; color: var(--text-dim);">
+                            <div>最后同步:<span id="webdav-last-sync">从未</span></div>
+                            <div>状态:<span id="webdav-last-status">未配置</span></div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <button id="settings-close-btn" class="close-icon-btn">×</button>

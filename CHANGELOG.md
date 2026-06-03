@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-03
+
+### 🚀 新增功能 (Features)
+- **WebDAV 多设备同步**
+  - 设置页加 "云端同步 (WebDAV)" 区域,填 URL + 用户名 + 密码即可启用
+  - 支持多设备间同步 hosts 配置(注意:系统设置本身不同步,只同步 `config.sync.json` + `profiles/*.txt`)
+  - 冲突策略: **last-write-wins**(基于 HTTP Last-Modified 头)
+  - 凭证安全: 密码存**系统 keychain**(Windows Credential Manager / macOS Keychain / Linux Secret Service),不写 `config.local.json`
+  - 一键 "测试连接" 验证 URL + 凭证
+  - 一键 "立即同步" 双向同步,toast 显示上传/下载/删除统计
+
+### 🔧 架构调整 (Refactor)
+- **存储拆分**
+  - `config.json` 拆成 `config.local.json`(系统设置)+ `config.sync.json`(hosts 元数据)
+  - 系统设置:theme / window_*/sidebar_width / auto_start / close_behavior / remember_close_choice / webdav 配置
+  - 同步数据:multi_select / profiles / active_profile_ids
+  - 启动时**自动迁移**老的 `config.json`(检测到就拆,旧文件保留作为备份)
+  - `AppConfig` 仍作为合并视图返回给前端(UI 不需要改)
+- 加 `keyring = "3"` crate(跨平台系统 keychain 抽象)
+- WebDAV HTTP 复用现成 `minreq`,PROPFIND / MKCOL / PUT / GET / DELETE 用 `Method::Custom` 实现
+
+### 🐛 修复 (Fixes)
+- 升级 `tauri-plugin-autostart` 到 2.5.1(旧版本在 macOS 上偶发不生效)
+- 修复设置页 `.pane-title` 标题与其下方第一个 form-group 间距过小(从 20px → 28px + 10px 内边距)
+- 修复软件内 GitHub 链接指向不存在的 `zengyufei/Hostlyy`(拼写错误,应小写 h),改为新 fork `cn07115/Hostlyy`
+
 ## [1.1.0] - 2026-06-03
 
 ### 🚀 新增功能 (Features)

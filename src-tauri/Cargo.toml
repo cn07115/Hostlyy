@@ -49,6 +49,7 @@ clap = { version = "4.5.54", features = ["derive"] }
 tempfile = "3.24.0"
 minreq = { version = "2.13.2", features = ["https"] }
 tokio = { version = "1", features = ["time", "rt-multi-thread", "macros"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "vendored"] }
 
 [profile.release]
 opt-level = "z"     # Optimize for size
