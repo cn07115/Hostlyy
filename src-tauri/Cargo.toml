@@ -52,6 +52,7 @@ tokio = { version = "1", features = ["time", "rt-multi-thread", "macros"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "vendored"] }
 once_cell = "1"
 open = "5"
+sha2 = "0.10"
 
 [profile.release]
 opt-level = "z"     # Optimize for size

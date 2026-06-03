@@ -14,6 +14,7 @@ use keyring::Entry;
 use minreq::Method;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -135,6 +136,7 @@ pub fn test_connection(config: &WebDavConfig, password: &str) -> Result<String, 
 
 pub fn perform_sync(
     app_dir: &PathBuf,
+    sync_cfg: &mut crate::storage::SyncConfig,
     config: &WebDavConfig,
     password: &str,
 ) -> Result<SyncResult, String> {
@@ -214,6 +216,22 @@ pub fn perform_sync(
     let errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let warnings: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let deleted_remote: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    // Content-hash dedup: profile is skipped entirely (no PUT, no HTTP) if
+    // its current SHA-256 matches the hash stored in SyncConfig from the
+    // last successful upload. Hash is the source of truth — mtime only
+    // triggers a hash check, since local FS mtime precision (μs/ns) often
+    // differs from HTTP Last-Modified (1s), which would re-PUT identical
+    // content on every sync. After a successful upload, the new hash is
+    // written back into this map (and later persisted to SyncConfig by
+    // `sync_now_internal`).
+    let last_hash_map: Arc<Mutex<std::collections::HashMap<String, String>>> =
+        Arc::new(Mutex::new(
+            sync_cfg
+                .profiles
+                .iter()
+                .filter_map(|p| p.last_hash.as_ref().map(|h| (p.id.clone(), h.clone())))
+                .collect(),
+        ));
 
     std::thread::scope(|s| {
         // 5a. Upload/download matching profiles — parallel
@@ -227,6 +245,7 @@ pub fn perform_sync(
             let downloaded = Arc::clone(&downloaded);
             let errors = Arc::clone(&errors);
             let warnings = Arc::clone(&warnings);
+            let last_hash_map = Arc::clone(&last_hash_map);
 
             s.spawn(move || {
                 if local_mtime > remote_mtime {
@@ -238,11 +257,30 @@ pub fn perform_sync(
                     }
                     if path.exists() {
                         let content = std::fs::read_to_string(&path).unwrap_or_default();
+                        // Hash check: skip PUT entirely if content is byte-for-byte
+                        // identical to the last successful upload.
+                        let current_hash = sha256_hex(content.as_bytes());
+                        let prev_hash = last_hash_map
+                            .lock()
+                            .unwrap()
+                            .get(&id)
+                            .cloned();
+                        if prev_hash.as_deref() == Some(current_hash.as_str()) {
+                            // No change since last sync — skip silently
+                            return;
+                        }
                         match dav_put(&url, &config.username, password, &content) {
-                            Ok(()) => uploaded
-                                .lock()
-                                .unwrap()
-                                .push(format!("{}/{}.txt", PROFILES_REMOTE_DIR, id)),
+                            Ok(()) => {
+                                uploaded
+                                    .lock()
+                                    .unwrap()
+                                    .push(format!("{}/{}.txt", PROFILES_REMOTE_DIR, id));
+                                // Record the new hash so the next sync can dedup
+                                last_hash_map
+                                    .lock()
+                                    .unwrap()
+                                    .insert(id.clone(), current_hash);
+                            }
                             Err(e) => errors
                                 .lock()
                                 .unwrap()
@@ -257,6 +295,14 @@ pub fn perform_sync(
                                 .lock()
                                 .unwrap()
                                 .push(format!("{}/{}.txt", PROFILES_REMOTE_DIR, id));
+                            // Reset the local hash on download so the next
+                            // upload re-sends our version (which now matches
+                            // the downloaded one, so it'll be skipped on its
+                            // own hash check).
+                            last_hash_map
+                                .lock()
+                                .unwrap()
+                                .insert(id.clone(), sha256_hex(content.as_bytes()));
                         }
                         Err(e) => errors
                             .lock()
@@ -330,6 +376,18 @@ pub fn perform_sync(
     result.errors = Arc::try_unwrap(errors).unwrap().into_inner().unwrap();
     result.warnings = Arc::try_unwrap(warnings).unwrap().into_inner().unwrap();
     result.deleted_remote = Arc::try_unwrap(deleted_remote).unwrap().into_inner().unwrap();
+
+    // Persist the updated last_hash map back into SyncConfig so the next
+    // sync can dedup against these hashes.
+    let hash_map = Arc::try_unwrap(last_hash_map)
+        .ok()
+        .map(|m| m.into_inner().unwrap())
+        .unwrap_or_default();
+    for p in sync_cfg.profiles.iter_mut() {
+        if let Some(h) = hash_map.get(&p.id) {
+            p.last_hash = Some(h.clone());
+        }
+    }
 
     Ok(result)
 }
@@ -405,6 +463,17 @@ fn ensure_remote_dir(url: &str, username: &str, password: &str) -> Result<(), St
     } else {
         Err(format!("MKCOL failed: HTTP {}", status))
     }
+}
+
+/// Hex-encoded SHA-256 of the given bytes. Used to detect whether a local
+/// file has actually changed since the last successful upload (mtime
+/// comparison is unreliable because local FS precision is finer than
+/// HTTP Last-Modified).
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    digest.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 fn list_remote(
@@ -608,7 +677,14 @@ pub fn sync_now_internal(app: &tauri::AppHandle) -> Result<Option<SyncResult>, S
     let cfg = WebDavConfig { url, username };
 
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let result = perform_sync(&app_dir, &cfg, &password);
+    // Load SyncConfig to get the per-profile `last_hash` for content-hash
+    // dedup; perform_sync mutates it and writes the updated hashes back.
+    let mut sync_cfg = crate::storage::load_sync_config_internal(&ctx)?;
+    let result = perform_sync(&app_dir, &mut sync_cfg, &cfg, &password);
+    // Persist updated SyncConfig regardless of sync result (the hashes
+    // are best-effort metadata; a failed PUT just means we keep the old hash
+    // for that profile and retry next sync).
+    let _ = crate::storage::save_sync_config_internal(&ctx, &sync_cfg);
 
     // Update status fields regardless of success
     match &result {

@@ -7,7 +7,9 @@
     <script>
         (function() {
             var mode = localStorage.getItem('hostly-theme');
-            if (!mode) {
+            // 'system' means follow the OS theme; the early-load script
+            // can't know the OS theme yet, so it picks via matchMedia.
+            if (!mode || mode === 'system') {
                 if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
                     mode = 'light';
                 } else {
@@ -197,6 +199,10 @@ https://example2.com/hosts2.txt" rows="3"></textarea>
                             <label class="radio-label">
                                 <input type="radio" name="theme-mode" value="dark">
                                 <span>深色</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="theme-mode" value="system">
+                                <span>跟随系统</span>
                             </label>
                         </div>
                     </div>

@@ -803,34 +803,100 @@ githubLink.onclick = () => {
 
 // Theme Logic
 // Theme Logic
+
+// Tracks the user's selected mode (one of: 'light', 'dark', 'system').
+// The actual applied theme is `applyThemeMode()` output, which expands
+// 'system' to the current OS theme.
+let selectedThemeMode = 'dark';
+
+/**
+ * Map a Tauri/webview theme value ('light' | 'dark') to our internal
+ * data-theme attribute. Falls back to OS preference probe via matchMedia,
+ * then to 'dark'.
+ */
+function resolveOsTheme(t) {
+    if (t === 'light' || t === 'dark') return t;
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        return 'light';
+    }
+    return 'dark';
+}
+
+/** Read the current OS theme via Tauri (with matchMedia fallback). */
+async function queryOsTheme() {
+    try {
+        const win = (tauri.window && tauri.window.getCurrentWindow)
+            ? tauri.window.getCurrentWindow()
+            : (tauri.webviewWindow && tauri.webviewWindow.getCurrentWebviewWindow
+                ? tauri.webviewWindow.getCurrentWebviewWindow() : null);
+        if (win && typeof win.theme === 'function') {
+            const t = await win.theme();
+            return resolveOsTheme(t);
+        }
+    } catch (e) {
+        // fall through to matchMedia
+    }
+    return resolveOsTheme(null);
+}
+
+/**
+ * Apply `selectedThemeMode` to the DOM. If mode is 'system', ask Tauri
+ * (or matchMedia) for the current OS theme and use that. This is the
+ * single function that touches data-theme, so any path that wants to
+ * re-apply the current mode (init, OS-theme-change, manual radio click)
+ * just calls it.
+ */
+async function applyThemeMode() {
+    let effective = selectedThemeMode;
+    if (effective === 'system') {
+        effective = await queryOsTheme();
+    }
+    document.documentElement.dataset.theme = effective;
+    localStorage.setItem('hostly-theme', selectedThemeMode); // store the *mode*, not the resolved value
+    // Sync the radio selection
+    const radios = document.getElementsByName('theme-mode');
+    radios.forEach(r => { if (r.value === selectedThemeMode) r.checked = true; });
+}
+
 async function initTheme() {
     try {
-        // Load from backend config
         const config = await invoke('load_config');
-        if (config.theme) {
-            setTheme(config.theme, false);
-        } else {
-            // Fallback to local storage or default
-            const saved = localStorage.getItem('hostly-theme') || 'dark';
-            setTheme(saved, true); // Sync valid default to backend
+        selectedThemeMode = config.theme || localStorage.getItem('hostly-theme') || 'dark';
+        // Validate stored value
+        if (!['light', 'dark', 'system'].includes(selectedThemeMode)) selectedThemeMode = 'dark';
+        await applyThemeMode();
+        // Persist if we fell back to a default (so the backend config matches DOM)
+        if (!config.theme) {
+            try { await invoke('set_theme', { theme: selectedThemeMode }); } catch (_) {}
         }
     } catch (e) {
         console.error('Failed to load theme config:', e);
         const saved = localStorage.getItem('hostly-theme') || 'dark';
-        setTheme(saved, false);
+        selectedThemeMode = ['light', 'dark', 'system'].includes(saved) ? saved : 'dark';
+        await applyThemeMode();
+    }
+    // Subscribe to OS theme changes so 'system' mode stays in sync
+    try {
+        const win = (tauri.window && tauri.window.getCurrentWindow)
+            ? tauri.window.getCurrentWindow()
+            : (tauri.webviewWindow && tauri.webviewWindow.getCurrentWebviewWindow
+                ? tauri.webviewWindow.getCurrentWebviewWindow() : null);
+        if (win && typeof win.onThemeChanged === 'function') {
+            await win.onThemeChanged(() => {
+                if (selectedThemeMode === 'system') {
+                    // Re-apply without awaiting (best effort)
+                    applyThemeMode();
+                }
+            });
+        }
+    } catch (e) {
+        // OS theme change tracking is best-effort
     }
 }
 
 async function setTheme(mode, persist = true) {
-    document.documentElement.dataset.theme = mode;
-    localStorage.setItem('hostly-theme', mode);
-    
-    // Update Radios
-    const radios = document.getElementsByName('theme-mode');
-    radios.forEach(r => {
-        if (r.value === mode) r.checked = true;
-    });
-
+    selectedThemeMode = mode;
+    await applyThemeMode();
     if (persist) {
         try {
             await invoke('set_theme', { theme: mode });

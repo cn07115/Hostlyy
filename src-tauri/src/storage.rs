@@ -15,6 +15,13 @@ pub struct ProfileMetadata {
     pub last_update: Option<String>,
     /// Auto-update interval in seconds (0 or None means manual)
     pub update_interval: Option<u64>,
+    /// SHA-256 of the last content successfully uploaded to the WebDAV
+    /// remote. Used to skip redundant PUTs when the local file hasn't
+    /// actually changed (mtime may differ between local FS precision and
+    /// HTTP Last-Modified second precision). `#[serde(default)]` keeps
+    /// backward compat with existing `config.sync.json` files.
+    #[serde(default)]
+    pub last_hash: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

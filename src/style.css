@@ -421,8 +421,8 @@ ul {
 }
 
 .footer-text-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: #8b949e;
+    background: var(--hover-bg);
+    border-color: var(--text-dim);
 }
 
 .footer-text-btn.spinning {
@@ -803,7 +803,7 @@ input[type="text"]:focus, textarea:focus, select:focus {
 /* Type Switch - Segmented Control Style */
 .type-switch {
     display: flex;
-    background: #161b22;
+    background: var(--input-bg);
     padding: 4px;
     border-radius: 6px;
     border: 1px solid var(--border-color);
