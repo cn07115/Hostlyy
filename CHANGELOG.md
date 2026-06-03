@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-06-03
+
+### 🐛 修复 (Fixes)
+
+- **修「保存配置后状态反而显示 未配置」**:后端 `save_webdav_config` 每次保存都会清空 `webdav_last_status = None`(line 238,注释「Clear status on config change」),本意是配置改了,旧状态失效。但前端 `formatSyncStatus` 把 `last_status == null` 解读为"未配置",就把"刚保存还没同步"显示成了"没配置",误导用户以为 keychain/网络又出问题了。**修法**:前端 `formatSyncStatus` 改吃整个 `SyncStatus` 对象,用后端已经返回的 `s.configured` 字段(`webdav_url.is_some() && webdav_username.is_some()`)判断"未配置";`last_status == null` 改为显示「已配置,未同步」,跟「未配置」清晰区分。
+
 ## [1.2.3] - 2026-06-03
 
 ### 🐛 修复 (Fixes)

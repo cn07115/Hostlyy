@@ -971,7 +971,7 @@ async function initSystemSettings() {
             // Password is intentionally left empty (we don't read from keychain)
             if (webdavLastSyncEl) {
                 webdavLastSyncEl.textContent = formatSyncTime(syncStatus.last_sync);
-                const st = formatSyncStatus(syncStatus.last_status);
+                const st = formatSyncStatus(syncStatus);
                 if (webdavLastStatusEl) {
                     webdavLastStatusEl.textContent = st.text;
                     webdavLastStatusEl.style.color = st.color;
@@ -1009,8 +1009,19 @@ function formatSyncTime(iso) {
     } catch { return iso; }
 }
 
-function formatSyncStatus(status) {
-    if (!status) return { text: '未配置', color: 'var(--text-muted)' };
+// Format the sync-status pill text + color. Takes the full SyncStatus
+// object (not just `last_status`) so we can distinguish "not configured"
+// (URL/username both None) from "configured but never synced" (last_status
+// is None because save_webdav_config clears it on every save, and no sync
+// has run yet).
+function formatSyncStatus(s) {
+    if (!s || !s.configured) {
+        return { text: '未配置', color: 'var(--text-muted)' };
+    }
+    if (!s.last_status) {
+        return { text: '已配置,未同步', color: 'var(--text-muted)' };
+    }
+    const status = s.last_status;
     if (status === 'ok') return { text: '成功', color: '#3fb950' };
     if (status.startsWith('partial')) return { text: status, color: '#d29922' };
     if (status.startsWith('error')) return { text: status, color: '#f85149' };
@@ -1021,7 +1032,7 @@ async function loadWebdavStatus() {
     try {
         const s = await invoke('get_sync_status');
         webdavLastSyncEl.textContent = formatSyncTime(s.last_sync);
-        const st = formatSyncStatus(s.last_status);
+        const st = formatSyncStatus(s);
         webdavLastStatusEl.textContent = st.text;
         webdavLastStatusEl.style.color = st.color;
     } catch(e) {
