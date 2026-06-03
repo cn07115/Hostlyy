@@ -11,7 +11,7 @@ use tauri::{
     Manager,
     Emitter,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder},
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -19,6 +19,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--autostarted"]),
@@ -49,7 +50,7 @@ pub fn run() {
             let _tray_handle = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .tooltip("Hostly")
+                .tooltip("Hostlyy")
                 .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
                         "show" => {
@@ -60,6 +61,15 @@ pub fn run() {
                         }
                         "quit" => {
                             app.exit(0);
+                        }
+                        id if id.starts_with("profile:") => {
+                            // 托盘子菜单点击:把 profile id 发到前端,前端切换编辑器内容
+                            let profile_id = id.trim_start_matches("profile:").to_string();
+                            let _ = app.emit("tray-select-profile", profile_id);
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
                         _ => {}
                     }
@@ -79,6 +89,9 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // 首次构建托盘菜单(含 hosts 子菜单)
+            rebuild_tray_menu(app.handle());
 
             let window_clone = window.clone();
             let app_handle = app.handle().clone();
@@ -197,6 +210,8 @@ pub fn run() {
             show_main_window,
             hide_to_tray,
             exit_app,
+            get_app_version,
+            rebuild_tray_menu_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -206,6 +221,90 @@ pub fn run() {
 fn show_main_window(window: tauri::Window) {
     window.show().unwrap();
     window.set_focus().unwrap();
+}
+
+#[tauri::command]
+fn get_app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Rebuild the tray menu with a fresh "Hosts" submenu listing all profiles.
+/// Called at startup and whenever the profile list changes (frontend triggers
+/// via the `rebuild_tray_menu` command).
+fn rebuild_tray_menu(app: &tauri::AppHandle) {
+    let tray = match app.tray_by_id("main") {
+        Some(t) => t,
+        None => return,
+    };
+
+    // Load profile list. On error, fall back to an empty submenu.
+    let ctx = storage::Context::Tauri(app);
+    let profiles: Vec<(String, String)> = match storage::load_config_internal(&ctx) {
+        Ok(cfg) => cfg
+            .profiles
+            .into_iter()
+            .map(|p| (p.id, p.name))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
+    // Build the hosts submenu with SubmenuBuilder
+    let mut builder = SubmenuBuilder::new(app, "快捷选择 hosts");
+    if profiles.is_empty() {
+        if let Ok(item) = MenuItem::with_id(app, "profile:empty", "（暂无配置）", false, None::<&str>) {
+            builder = builder.item(&item);
+        }
+    } else {
+        for (id, name) in &profiles {
+            let label = if name.is_empty() { id.as_str() } else { name.as_str() };
+            if let Ok(item) = MenuItem::with_id(
+                app,
+                format!("profile:{}", id),
+                label,
+                true,
+                None::<&str>,
+            ) {
+                builder = builder.item(&item);
+            }
+        }
+    }
+    let hosts_submenu = match builder.build() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    // Build the full tray menu
+    let show_item = match MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+    let quit_item = match MenuItem::with_id(app, "quit", "退出", true, None::<&str>) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+    let sep1 = match PredefinedMenuItem::separator(app) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+    let sep2 = match PredefinedMenuItem::separator(app) {
+        Ok(i) => i,
+        Err(_) => return,
+    };
+
+    let menu = match Menu::with_items(
+        app,
+        &[&show_item, &sep1, &hosts_submenu, &sep2, &quit_item],
+    ) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+
+    let _ = tray.set_menu(Some(menu));
+}
+
+#[tauri::command]
+fn rebuild_tray_menu_cmd(app: tauri::AppHandle) {
+    rebuild_tray_menu(&app);
 }
 
 #[tauri::command]

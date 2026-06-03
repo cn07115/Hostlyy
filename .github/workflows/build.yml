@@ -159,11 +159,55 @@ jobs:
           cat release_notes.md
           echo "--- end ---"
 
+      # ============== SIGN ARTIFACTS (Tauri updater) ==============
+      # 给自动更新用:对平台安装包签名,生成 latest.json(包含签名 + 平台 URL)。
+      # 客户端启动时拉取 latest.json,验证签名后下载新版本。
+      # 需要在 GH 仓库 secrets 里配:
+      #   TAURI_SIGNING_PRIVATE_KEY       (key 文件内容,base64)
+      #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+      # 没配也没关系,softprops 仍会发版,只是客户端检测不到更新。
+      - name: Setup Node (for tauri CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Tar macOS .app bundles for updater
+        run: |
+          for app in artifacts/**/Hostly.app; do
+            [ -d "$app" ] || continue
+            tar -czf "${app}.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
+          done
+          find artifacts -name 'Hostly.app.tar.gz' -print
+
+      - name: Sign installers and generate latest.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -e
+          # 定位每个平台的安装包(版本号在文件名里,需要通配)
+          WIN_EXE=$(find artifacts -name 'Hostly_*_x64-setup.exe' | head -1)
+          MAC_ARM_TGZ=$(find artifacts -path '*macos-arm64*' -name 'Hostly.app.tar.gz' | head -1)
+          MAC_X64_TGZ=$(find artifacts -path '*macos-x64*' -name 'Hostly.app.tar.gz' | head -1)
+          LINUX_APPIMAGE=$(find artifacts -name '*.AppImage' | head -1)
+          echo "Windows: $WIN_EXE"
+          echo "macOS arm64: $MAC_ARM_TGZ"
+          echo "macOS x64: $MAC_X64_TGZ"
+          echo "Linux: $LINUX_APPIMAGE"
+          # 拼 base URL:所有 artifact 共享 GitHub release 的下载前缀
+          BASE="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+          ARGS=()
+          [ -n "$WIN_EXE" ]      && ARGS+=(-b "$BASE/$(basename "$WIN_EXE")")
+          [ -n "$MAC_ARM_TGZ" ]  && ARGS+=(-b "$BASE/$(basename "$MAC_ARM_TGZ")")
+          [ -n "$MAC_X64_TGZ" ]  && ARGS+=(-b "$BASE/$(basename "$MAC_X64_TGZ")")
+          [ -n "$LINUX_APPIMAGE" ] && ARGS+=(-b "$BASE/$(basename "$LINUX_APPIMAGE")")
+          npx @tauri-apps/cli signer sign "${ARGS[@]}"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Hostly ${{ github.ref_name }}"
+          name: "Hostlyy ${{ github.ref_name }}"
           body_path: release_notes.md
           draft: false
           prerelease: false
@@ -175,6 +219,9 @@ jobs:
             artifacts/**/*.deb
             artifacts/**/*.rpm
             artifacts/**/*.zip
+            artifacts/**/*.tar.gz
+            artifacts/**/*.sig
+            artifacts/**/latest.json
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

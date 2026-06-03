@@ -212,7 +212,12 @@ async function loadData() {
         console.log('Common config loaded');
         
         renderList();
-        
+
+        // 重建托盘菜单(包含最新 profile 列表)。失败也不影响主流程,静默。
+        invoke('rebuild_tray_menu_cmd').catch(err => {
+            console.warn('rebuild tray menu failed:', err);
+        });
+
         // Refresh editor if common is active
         if (currentProfileId === 'common') {
             editor.value = commonConfig;
@@ -912,9 +917,101 @@ settingsBtn.onclick = () => {
 
     Promise.all([
         initWindowSettings(),
-        initSystemSettings()
+        initSystemSettings(),
+        initAboutPane()
     ]);
 };
+
+// Settings tab switching
+document.querySelectorAll('.settings-tab').forEach(tab => {
+    tab.onclick = () => {
+        const target = tab.dataset.tab;
+        document.querySelectorAll('.settings-tab').forEach(t => {
+            t.classList.toggle('active', t === tab);
+        });
+        document.querySelectorAll('.settings-pane').forEach(p => {
+            p.classList.toggle('active', p.id === `tab-${target}`);
+        });
+    };
+});
+
+// About pane
+async function initAboutPane() {
+    try {
+        const version = await invoke('get_app_version');
+        const vEl = document.getElementById('about-version');
+        if (vEl) vEl.textContent = version;
+    } catch (e) {
+        console.error('Failed to load version:', e);
+    }
+}
+
+const aboutGithubLink = document.getElementById('about-github-link');
+if (aboutGithubLink) {
+    aboutGithubLink.onclick = (e) => {
+        e.preventDefault();
+        invoke('hostly_open_url', { url: 'https://github.com/cn07115/Hostlyy' });
+    };
+}
+
+const aboutCopyGithub = document.getElementById('about-copy-github');
+if (aboutCopyGithub) {
+    aboutCopyGithub.onclick = async () => {
+        try {
+            await navigator.clipboard.writeText('https://github.com/cn07115/Hostlyy');
+            showToast('已复制 GitHub 地址', 'success');
+        } catch (e) {
+            showToast(`复制失败: ${e}`, 'error');
+        }
+    };
+}
+
+const aboutCheckUpdateBtn = document.getElementById('about-check-update');
+const aboutUpdateStatus = document.getElementById('about-update-status');
+const aboutUpdateDetail = document.getElementById('about-update-detail');
+
+if (aboutCheckUpdateBtn) {
+    aboutCheckUpdateBtn.onclick = async () => {
+        aboutCheckUpdateBtn.disabled = true;
+        aboutUpdateStatus.textContent = '检查中...';
+        aboutUpdateStatus.style.color = 'var(--text-dim)';
+        aboutUpdateDetail.textContent = '';
+        try {
+            // Use the official tauri-plugin-updater JS API
+            const updater = (tauri.updater && tauri.updater.check)
+                ? tauri.updater
+                : (window.__TAURI__ && window.__TAURI__.updater);
+            if (!updater || typeof updater.check !== 'function') {
+                throw new Error('更新插件未初始化');
+            }
+            const update = await updater.check();
+            if (update === null) {
+                aboutUpdateStatus.textContent = '已是最新版本';
+                aboutUpdateStatus.style.color = '#3fb950';
+            } else {
+                aboutUpdateStatus.textContent = `发现新版本 ${update.version}`;
+                aboutUpdateStatus.style.color = '#d29922';
+                const yesNo = await ask(`发现新版本 ${update.version}，是否立即下载并安装？`, {
+                    title: '更新可用',
+                    kind: 'info',
+                });
+                if (yesNo) {
+                    aboutUpdateStatus.textContent = '下载中...';
+                    await update.downloadAndInstall();
+                    aboutUpdateStatus.textContent = '已下载,重启后生效';
+                    aboutUpdateStatus.style.color = '#3fb950';
+                }
+            }
+        } catch (e) {
+            console.error('Update check failed:', e);
+            aboutUpdateStatus.textContent = '检查失败';
+            aboutUpdateStatus.style.color = '#f85149';
+            aboutUpdateDetail.textContent = String(e);
+        } finally {
+            aboutCheckUpdateBtn.disabled = false;
+        }
+    };
+}
 
 const closeSettings = () => settingsModalOverlay.classList.add('hidden');
 settingsCloseBtn.onclick = closeSettings;
@@ -1203,6 +1300,11 @@ if (tauri.event && typeof tauri.event.listen === 'function') {
     tauri.event.listen('webdav-error', (event) => {
         const msg = event.payload || '未知错误';
         showToast(`WebDAV: ${msg}`, 'error');
+    });
+    // 托盘子菜单点击:把对应 profile 切到编辑器
+    tauri.event.listen('tray-select-profile', (event) => {
+        const id = event.payload;
+        if (id) selectProfile(id);
     });
 }
 
