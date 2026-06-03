@@ -1419,7 +1419,63 @@ window.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => {
         invoke('show_main_window');
     }, 50);
+
+    // 启动后异步检查更新,有新版就弹窗;不阻塞主流程
+    setTimeout(() => { checkUpdateOnStartup(); }, 3000);
 });
+
+// =============== 启动更新检查 ===============
+async function checkUpdateOnStartup() {
+    try {
+        const updater = (window.__TAURI__ && window.__TAURI__.updater)
+            ? window.__TAURI__.updater
+            : (tauri.updater || null);
+        if (!updater || typeof updater.check !== 'function') return;
+        const update = await updater.check();
+        if (update === null || !update.available) {
+            console.log('Already on latest version');
+            return;
+        }
+        // 弹窗
+        const overlay = document.getElementById('update-startup-overlay');
+        const curEl = document.getElementById('update-startup-current');
+        const latestEl = document.getElementById('update-startup-latest');
+        const notesEl = document.getElementById('update-startup-notes');
+        const yesBtn = document.getElementById('update-startup-yes');
+        const noBtn = document.getElementById('update-startup-no');
+        if (!overlay || !yesBtn || !noBtn) return;
+        // 拿当前版本号(从 main 进程读)
+        let cur = '当前版本';
+        try { cur = await invoke('get_app_version'); } catch (_) {}
+        curEl.textContent = cur;
+        latestEl.textContent = update.version || '—';
+        notesEl.textContent = update.notes || '（无更新说明）';
+        // 弹窗
+        overlay.classList.remove('hidden');
+        const dismiss = () => overlay.classList.add('hidden');
+        noBtn.onclick = dismiss;
+        yesBtn.onclick = async () => {
+            yesBtn.disabled = true;
+            noBtn.disabled = true;
+            yesBtn.textContent = '下载中...';
+            try {
+                await update.downloadAndInstall();
+                // 下载完会提示重启才能生效
+                overlay.classList.add('hidden');
+                showToast('已下载,重启后生效', 'success');
+            } catch (e) {
+                console.error('Update install failed:', e);
+                showToast(`更新失败: ${e}`, 'error');
+                yesBtn.disabled = false;
+                noBtn.disabled = false;
+                yesBtn.textContent = '立即更新';
+            }
+        };
+    } catch (e) {
+        // 离线/endpoint 不通/plugin 没初始化 — 都静默吞,不影响主流程
+        console.log('Startup update check skipped:', e);
+    }
+}
 
 // Sidebar Resizing
 let isResizingSidebar = false;

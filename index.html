@@ -348,6 +348,24 @@ https://example2.com/hosts2.txt" rows="3"></textarea>
         </div>
     </div>
 
+    <!-- 启动更新提示对话框 -->
+    <div id="update-startup-overlay" class="hidden">
+        <div class="modal" style="min-width: 400px; max-width: 600px;">
+            <h4>发现新版本</h4>
+            <p style="margin: 8px 0; color: var(--text-dim); font-size: 13px;">
+                当前版本:<span id="update-startup-current">—</span>
+                &nbsp;→&nbsp;
+                最新版本:<strong id="update-startup-latest">—</strong>
+            </p>
+            <p style="margin: 8px 0 4px; font-size: 12px; color: var(--text-muted);">更新内容</p>
+            <div id="update-startup-notes" style="margin: 4px 0 16px; padding: 12px; background: var(--input-bg); border-radius: 6px; max-height: 320px; overflow-y: auto; font-size: 13px; white-space: pre-wrap; font-family: 'Cascadia Code', Consolas, monospace;"></div>
+            <div class="modal-buttons">
+                <button id="update-startup-no" class="secondary">暂不更新</button>
+                <button id="update-startup-yes" class="primary">立即更新</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/src/main.js" type="module"></script>
 </body>
 </html>
