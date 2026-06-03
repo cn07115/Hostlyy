@@ -697,10 +697,17 @@ input:checked + .slider:before {
     display: block;
 }
 .pane-title {
-    margin-bottom: 28px;
+    margin-bottom: 20px;
     font-size: 18px;
     border-bottom: 1px solid var(--border-color);
-    padding-bottom: 10px;
+    padding-bottom: 14px;
+}
+
+/* Extra breathing room between a section heading's divider and the first
+ * form-group right under it (otherwise the divider line feels glued to the
+ * first control). */
+.pane-title + .form-group {
+    margin-top: 16px;
 }
 
 .close-icon-btn {

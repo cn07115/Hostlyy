@@ -1087,6 +1087,11 @@ webdavSyncBtn.onclick = async () => {
     try {
         const result = await invoke('sync_now');
         await loadWebdavStatus();
+        if (result === null || result === undefined) {
+            // Backend returned null → WebDAV not configured, silent skip
+            showToast('WebDAV 未配置,跳过了同步', 'info');
+            return;
+        }
         const warnMsg = (result.warnings && result.warnings.length > 0)
             ? ` | ⚠ ${result.warnings.join('; ')}`
             : '';
@@ -1103,6 +1108,14 @@ webdavSyncBtn.onclick = async () => {
         webdavSyncBtn.textContent = originalText;
     }
 };
+
+// Listen for background WebDAV errors (auto-sync / startup pull / periodic pull)
+if (tauri.event && typeof tauri.event.listen === 'function') {
+    tauri.event.listen('webdav-error', (event) => {
+        const msg = event.payload || '未知错误';
+        showToast(`WebDAV: ${msg}`, 'error');
+    });
+}
 
 document.getElementById('auto-start-checkbox').onchange = async (e) => {
     try {

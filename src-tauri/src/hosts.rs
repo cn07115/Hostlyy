@@ -96,26 +96,8 @@ pub fn check_write_permission() -> Result<bool, String> {
 
 #[tauri::command]
 pub fn hostly_open_url(url: String) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(&["/C", "start", &url])
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    // Use the `open` crate: cross-platform, no flashing cmd window on Windows
+    // (the previous implementation used `cmd /C start <url>` which briefly
+    // allocated a console). Detaches the child so the GUI doesn't block.
+    open::that_detached(&url).map_err(|e| e.to_string())
 }

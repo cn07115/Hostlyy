@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-06-03
+
+### 🔄 同步体验 (Sync UX)
+- **后台错误可见**: 自动同步 / 启动拉取 / 周期拉取 失败时(配置错误、网络断开、凭证失效)会发 `webdav-error` 事件,前端用 toast 提示用户,不再 `eprintln!` 静默吞错
+- **未配置静默跳过**: `sync_now_internal` 改返回 `Result<Option<SyncResult>, String>`,未配置返回 `Ok(None)`,前端同步按钮显示 info toast "WebDAV 未配置,跳过了同步",**不再弹"未配置"红色错误**
+- **凭证错误分类**: 之前所有错误都堆在一起,现在 keychain 凭证缺失会单独返回"凭证读取失败: ..."(并在 status 里写 `error: credentials: ...`),方便定位
+
+### 🐛 修复 (Fixes)
+- **软件内点 URL 不再闪 cmd 窗口**: `hostly_open_url` 从 `cmd /C start <url>` 换成 `open::that_detached`,跨平台统一,且 Windows 不再临时分配控制台
+- **优化设置页标题与下方控件间距**: `.pane-title` 边距从 `28px` 调到 `20px`,padding-bottom 改成 `14px`,再加 `.pane-title + .form-group { margin-top: 16px }`,分隔线和第一个 form-group 之间有合理呼吸空间(之前要么贴太近要么空太大)
+
 ## [1.2.1] - 2026-06-03
 
 ### 🔄 自动同步 (Auto-sync)

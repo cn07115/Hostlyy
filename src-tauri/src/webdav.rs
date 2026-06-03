@@ -514,18 +514,36 @@ pub fn schedule_sync() {
 }
 
 /// Run a full sync: load local config, perform WebDAV sync, update
-/// status fields in `config.local.json`. Returns the sync result.
+/// status fields in `config.local.json`. Returns:
+///   - `Ok(None)`    — WebDAV not configured, **skipped silently**
+///   - `Ok(Some(r))` — sync ran (status updated, no toast needed)
+///   - `Err(msg)`    — configured but the sync failed (caller should notify user)
+///
 /// Used by:
 ///  - the `sync_now` Tauri command (manual button)
 ///  - the scheduler loop (debounced push after mutations)
 ///  - the startup pull task
 ///  - the periodic background pull task
-pub fn sync_now_internal(app: &tauri::AppHandle) -> Result<SyncResult, String> {
+pub fn sync_now_internal(app: &tauri::AppHandle) -> Result<Option<SyncResult>, String> {
     let ctx = crate::storage::Context::Tauri(app);
     let mut local = crate::storage::load_local_config_internal(&ctx)?;
-    let url = local.webdav_url.clone().ok_or("WebDAV URL 未配置")?;
-    let username = local.webdav_username.clone().ok_or("WebDAV 用户名未配置")?;
-    let password = load_credentials(&username)?;
+
+    // Not configured → silent skip, no error, no status update
+    if local.webdav_url.is_none() || local.webdav_username.is_none() {
+        return Ok(None);
+    }
+    let url = local.webdav_url.clone().unwrap();
+    let username = local.webdav_username.clone().unwrap();
+    let password = match load_credentials(&username) {
+        Ok(p) => p,
+        Err(e) => {
+            // Credentials missing in keychain (e.g., user cleared them).
+            // Update status as a config error and surface to the user.
+            local.webdav_last_status = Some(format!("error: credentials: {}", e));
+            let _ = crate::storage::save_local_config_internal(&ctx, &local);
+            return Err(format!("凭证读取失败: {}", e));
+        }
+    };
     let cfg = WebDavConfig { url, username };
 
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -548,7 +566,7 @@ pub fn sync_now_internal(app: &tauri::AppHandle) -> Result<SyncResult, String> {
     }
     let _ = crate::storage::save_local_config_internal(&ctx, &local);
 
-    result
+    result.map(Some)
 }
 
 impl SyncScheduler {
@@ -569,7 +587,7 @@ impl SyncScheduler {
 
     /// Force an immediate sync (skip the debounce). Used at app startup
     /// and by the periodic background pull.
-    pub async fn run_immediate(&self) -> Result<SyncResult, String> {
+    pub async fn run_immediate(&self) -> Result<Option<SyncResult>, String> {
         sync_now_internal(&self.app)
     }
 
@@ -598,7 +616,8 @@ impl SyncScheduler {
             if should_fire {
                 let result = sync_now_internal(&self.app);
                 if let Err(e) = &result {
-                    eprintln!("Scheduled sync failed: {}", e);
+                    use tauri::Emitter;
+                    let _ = self.app.emit("webdav-error", format!("自动同步失败: {}", e));
                 }
             }
         }

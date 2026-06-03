@@ -125,20 +125,33 @@ pub fn run() {
                 sched_for_loop.run_loop().await;
             });
             // Startup pull: 3s delay then pull
+            let app_for_startup = app.handle().clone();
             let sched_for_startup = scheduler.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                if let Err(e) = sched_for_startup.run_immediate().await {
-                    eprintln!("Startup sync failed: {}", e);
+                match sched_for_startup.run_immediate().await {
+                    Ok(Some(_)) => {} // success, status already updated
+                    Ok(None) => {}    // skipped (not configured) — silent
+                    Err(e) => {
+                        // Configured but failed — surface to user
+                        use tauri::Emitter;
+                        let _ = app_for_startup.emit("webdav-error", format!("启动同步失败: {}", e));
+                    }
                 }
             });
             // Periodic pull: every 5 min
+            let app_for_periodic = app.handle().clone();
             let sched_for_periodic = scheduler.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
-                    if let Err(e) = sched_for_periodic.run_immediate().await {
-                        eprintln!("Periodic sync failed: {}", e);
+                    match sched_for_periodic.run_immediate().await {
+                        Ok(Some(_)) => {}
+                        Ok(None) => {}
+                        Err(e) => {
+                            use tauri::Emitter;
+                            let _ = app_for_periodic.emit("webdav-error", format!("周期同步失败: {}", e));
+                        }
                     }
                 }
             });
@@ -238,7 +251,7 @@ fn test_webdav_connection(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn sync_now(app: tauri::AppHandle) -> Result<webdav::SyncResult, String> {
+fn sync_now(app: tauri::AppHandle) -> Result<Option<webdav::SyncResult>, String> {
     webdav::sync_now_internal(&app)
 }
 
