@@ -880,7 +880,25 @@ async function initTheme() {
         selectedThemeMode = ['light', 'dark', 'system'].includes(saved) ? saved : 'dark';
         await applyThemeMode();
     }
-    // Subscribe to OS theme changes so 'system' mode stays in sync
+    // Subscribe to OS theme changes so 'system' mode stays in sync.
+    // 双轨:matchMedia 是 webview 通用兜底(WebView2/WebKit/WebKitGTK 都支持);
+    // Tauri 的 onThemeChanged 在某些 webview 上不靠谱,作为补充。
+    try {
+        if (window.matchMedia) {
+            const mq = window.matchMedia('(prefers-color-scheme: light)');
+            const onChange = () => {
+                if (selectedThemeMode === 'system') applyThemeMode();
+            };
+            if (typeof mq.addEventListener === 'function') {
+                mq.addEventListener('change', onChange);
+            } else if (typeof mq.addListener === 'function') {
+                // Old Safari
+                mq.addListener(onChange);
+            }
+        }
+    } catch (e) {
+        // OS theme tracking is best-effort
+    }
     try {
         const win = (tauri.window && tauri.window.getCurrentWindow)
             ? tauri.window.getCurrentWindow()
@@ -889,13 +907,12 @@ async function initTheme() {
         if (win && typeof win.onThemeChanged === 'function') {
             await win.onThemeChanged(() => {
                 if (selectedThemeMode === 'system') {
-                    // Re-apply without awaiting (best effort)
                     applyThemeMode();
                 }
             });
         }
     } catch (e) {
-        // OS theme change tracking is best-effort
+        // OS theme tracking is best-effort
     }
 }
 
