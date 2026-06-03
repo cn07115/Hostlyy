@@ -1051,6 +1051,21 @@ webdavSaveBtn.onclick = async () => {
     }
 };
 
+// Format SyncResult summary on the frontend. The Rust `summary()` method
+// doesn't survive Tauri serialization (only struct fields cross the IPC
+// boundary), so we re-implement it in JS.
+function formatSyncSummary(r) {
+    const parts = [];
+    if (r.uploaded && r.uploaded.length) parts.push(`上传 ${r.uploaded.length} 个`);
+    if (r.downloaded && r.downloaded.length) parts.push(`下载 ${r.downloaded.length} 个`);
+    if (r.deleted_remote && r.deleted_remote.length) parts.push(`远端删除 ${r.deleted_remote.length} 个`);
+    if (r.errors && r.errors.length) {
+        const base = parts.length ? parts.join('，') : '无变化';
+        return `${base}；错误 ${r.errors.length} 个`;
+    }
+    return parts.length ? parts.join('，') : '无变化';
+}
+
 webdavTestBtn.onclick = async () => {
     const url = (webdavUrlEl.value || '').trim();
     const username = (webdavUsernameEl.value || '').trim();
@@ -1058,15 +1073,12 @@ webdavTestBtn.onclick = async () => {
         showToast('请先填写 WebDAV 地址和用户名', 'error');
         return;
     }
-    // Save first (so backend has the credentials), then test
-    try {
-        const password = webdavPasswordEl.value || '';
-        await invoke('save_webdav_config', { url, username, password });
-        webdavPasswordEl.value = '';
-    } catch(e) {
-        showToast(`保存失败: ${e}`, 'error');
-        return;
-    }
+    // No auto-save: the test button only verifies the saved config.
+    // The separate 保存配置 button is the canonical way to save, and
+    // auto-saving here would re-send an empty password (DOM is cleared
+    // after 保存 for security) and accidentally delete the keychain entry.
+    // If the user hasn't saved yet, the backend will return a friendly
+    // "请先点击保存配置" error.
     webdavTestBtn.disabled = true;
     webdavTestBtn.textContent = '测试中...';
     try {
@@ -1096,9 +1108,9 @@ webdavSyncBtn.onclick = async () => {
             ? ` | ⚠ ${result.warnings.join('; ')}`
             : '';
         if (result.errors && result.errors.length > 0) {
-            showToast(`部分完成: ${result.summary()}${warnMsg}`, 'error');
+            showToast(`部分完成: ${formatSyncSummary(result)}${warnMsg}`, 'error');
         } else {
-            showToast(`同步完成: ${result.summary()}${warnMsg}`, 'success');
+            showToast(`同步完成: ${formatSyncSummary(result)}${warnMsg}`, 'success');
         }
     } catch(e) {
         await loadWebdavStatus();

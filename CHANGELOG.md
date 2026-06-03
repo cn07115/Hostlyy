@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-06-03
+
+### 🐛 修复 (Fixes)
+
+- **修「点击测试连接后密码被删」的连锁 bug**:测试连接按钮原本会先 `save_webdav_config(url, username, password)` 再测试,但密码框在「保存配置」成功后会被**故意清空**(防泄漏),导致测试按钮读到空 password → 后端 `save_credentials` 走"空密码=删 entry"分支 → keychain 里的密码被清掉 → 紧接着 `test_webdav_connection` 报"读取 keychain 失败: No matching entry"。**修法**:测试按钮**不再 auto-save**,直接测已保存的配置;如果还没保存,后端返回友好提示「请先填写并点击 保存配置」。
+- **修 `TypeError: t.summary is not a function`**:Rust 的 `SyncResult::summary()` 是方法,Tauri IPC 跨进程序列化时**只带 struct 字段,方法全丢**。前端同步按钮原本调 `result.summary()`,所以同步成功但 toast 报红。**修法**:前端 `main.js` 加 `formatSyncSummary(r)` helper 复算一遍(同样的上传/下载/远端删除/错误 计数逻辑)。
+- **后端 `test_webdav_connection` 错误信息更友好**:未配置时返回「请先填写并点击 保存配置」(之前是干巴巴的「WebDAV URL 未配置」),引导用户走正确的保存流程。
+
 ## [1.2.2] - 2026-06-03
 
 ### 🔄 同步体验 (Sync UX)

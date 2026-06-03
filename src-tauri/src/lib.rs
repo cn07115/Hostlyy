@@ -243,8 +243,11 @@ fn save_webdav_config(
 fn test_webdav_connection(app: tauri::AppHandle) -> Result<String, String> {
     let ctx = storage::Context::Tauri(&app);
     let local = storage::load_local_config_internal(&ctx)?;
-    let url = local.webdav_url.ok_or("WebDAV URL 未配置")?;
-    let username = local.webdav_username.ok_or("WebDAV 用户名未配置")?;
+    if local.webdav_url.is_none() || local.webdav_username.is_none() {
+        return Err("请先填写并点击「保存配置」".to_string());
+    }
+    let url = local.webdav_url.unwrap();
+    let username = local.webdav_username.unwrap();
     let password = webdav::load_credentials(&username)?;
     let cfg = webdav::WebDavConfig { url, username };
     webdav::test_connection(&cfg, &password)
