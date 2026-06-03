@@ -152,15 +152,9 @@ jobs:
         run: |
           # 把 tag 里的 v 前缀去掉,比如 v1.1.0 -> 1.1.0
           VERSION="${GITHUB_REF_NAME#v}"
-          # 从 CHANGELOG.md 抽取 [VERSION] 那段,直到下一个 ## [
-          awk -v ver="$VERSION" '
-            BEGIN { in_section=0; print_first=0 }
-            /^## \[/ {
-              if (in_section) exit
-              if (index($0, "[" ver "]") > 0) { in_section=1; print_first=1 }
-            }
-            print_first { print; if (NR > 1 && /^## /) print_first=0 }
-          ' CHANGELOG.md > release_notes.md
+          # 从 CHANGELOG.md 抽取 [VERSION] 这一段,直到下一个 ## [
+          # 第一个 sed 抓范围,第二个 sed 删掉最后一行(下一段的起始)
+          sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '$d' > release_notes.md
           echo "--- release_notes.md ---"
           cat release_notes.md
           echo "--- end ---"
