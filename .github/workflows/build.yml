@@ -8,6 +8,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# GITHUB_TOKEN 默认 read-only,创建 release 需要显式申请写权限
+permissions:
+  contents: write
+
 jobs:
   build:
     name: ${{ matrix.platform }} (${{ matrix.target || 'native' }})
