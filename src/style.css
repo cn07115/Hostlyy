@@ -697,7 +697,7 @@ input:checked + .slider:before {
     display: block;
 }
 .pane-title {
-    margin-bottom: 20px;
+    margin-bottom: 28px;
     font-size: 18px;
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 10px;
