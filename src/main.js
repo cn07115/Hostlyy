@@ -798,7 +798,7 @@ importSwitchHostsBtn.onclick = importSwitchHosts;
 exportBtn.onclick = exportAll;
 
 githubLink.onclick = () => {
-    invoke('hostly_open_url', { url: 'https://github.com/zengyufei/Hostly' });
+    invoke('hostly_open_url', { url: 'https://github.com/cn07115/Hostlyy' });
 };
 
 // Theme Logic
