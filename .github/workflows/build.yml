@@ -175,49 +175,112 @@ jobs:
 
       - name: Tar macOS .app bundles for updater
         run: |
-          for app in artifacts/**/Hostly.app; do
-            [ -d "$app" ] || continue
+          set -x
+          # 调试:打印 artifacts/ 实际目录结构,方便定位 Hostly.app 真实位置
+          echo "--- artifacts/ tree ---"
+          find artifacts -maxdepth 3 -type d -print
+          echo "--- Hostly.app candidates ---"
+          find artifacts -name 'Hostly.app' -type d -print
+          # 用 find 找所有 Hostly.app 目录,逐个打成 .tar.gz(不写死路径,鲁棒匹配各种 CI 布局)
+          find artifacts -name 'Hostly.app' -type d | while read -r app; do
             tar -czf "${app}.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
           done
+          echo "--- produced tar.gz ---"
           find artifacts -name 'Hostly.app.tar.gz' -print
 
-      - name: Sign installers and generate latest.json
+      - name: Sign installers
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -e
-          # 定位每个平台的安装包(版本号在文件名里,需要通配)
-          WIN_EXE=$(find artifacts -name 'Hostly_*_x64-setup.exe' | head -1)
+          # 定位每个平台的安装包(Hostlyy 带 y 是产品名;版本号在文件名里,需要通配)
+          WIN_EXE=$(find artifacts -name 'Hostlyy_*_x64-setup.exe' | head -1)
           MAC_ARM_TGZ=$(find artifacts -path '*macos-arm64*' -name 'Hostly.app.tar.gz' | head -1)
           MAC_X64_TGZ=$(find artifacts -path '*macos-x64*' -name 'Hostly.app.tar.gz' | head -1)
-          LINUX_APPIMAGE=$(find artifacts -name '*.AppImage' | head -1)
+          LINUX_APPIMAGE=$(find artifacts -name 'Hostlyy_*_amd64.AppImage' | head -1)
           echo "Windows: $WIN_EXE"
           echo "macOS arm64: $MAC_ARM_TGZ"
           echo "macOS x64: $MAC_X64_TGZ"
           echo "Linux: $LINUX_APPIMAGE"
-          # tauri 2.11+ 的 signer sign 改用位置参数(不要 -b);URL 自动从 tauri.conf.json
-          # 的 endpoint 拼接(把 latest 替换成当前 tag)
+          # tauri-cli 2.11.x 的 signer sign 命令一次只接受 1 个文件位置参数(2.11.2 报错
+          # 验证过);所以循环逐个 sign。只对能 updater 下载的文件签名
+          # (setup.exe / .app.tar.gz / AppImage),msi/dmg/deb/rpm 不签
+          # pin tauri cli 2.11.0 锁版本,防止 2.11.x patch 升级再改行为
           FILES=()
           [ -n "$WIN_EXE" ]       && FILES+=("$WIN_EXE")
           [ -n "$MAC_ARM_TGZ" ]   && FILES+=("$MAC_ARM_TGZ")
           [ -n "$MAC_X64_TGZ" ]   && FILES+=("$MAC_X64_TGZ")
           [ -n "$LINUX_APPIMAGE" ] && FILES+=("$LINUX_APPIMAGE")
-          npx @tauri-apps/cli signer sign "${FILES[@]}"
+          for f in "${FILES[@]}"; do
+            echo "  signing: $f"
+            npx @tauri-apps/cli@2.11.0 signer sign "$f"
+          done
+          # signer sign 在 <file>.sig 写 base64 signature;统一收集到 artifacts/signatures/
+          # 方便下一步 Generate latest.json 引用
+          mkdir -p artifacts/signatures
+          find artifacts -name '*.sig' -exec cp -f {} artifacts/signatures/ \;
+          echo "--- generated signatures ---"
+          ls -la artifacts/signatures/ || true
+
+      # signer sign 不产 latest.json(它只产 .sig);这里手动拼 latest.json,
+      # 收集所有 .sig + 对应 installer,生成 Tauri updater 需要的 manifest
+      - name: Generate latest.json
+        env:
+          GITHUB_REPO: cn07115/Hostlyy
+        run: |
+          set -e
+          VERSION="${GITHUB_REF_NAME#v}"
+          PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          BASE_URL="https://github.com/${GITHUB_REPO}/releases/download/${GITHUB_REF_NAME}"
+
+          # 平台键:windows-x86_64 / darwin-aarch64 / darwin-x86_64 / linux-x86_64 (Tauri 2 标准)
+          PLATFORMS='{}'
+
+          add_platform() {
+            local key="$1" file="$2"
+            [ -z "$file" ] && return
+            local sigfile="${file}.sig"
+            [ ! -f "$sigfile" ] && { echo "  skip $key: no signature at $sigfile"; return; }
+            local sig
+            sig=$(cat "$sigfile")
+            local fname
+            fname=$(basename "$file")
+            local url="${BASE_URL}/${fname}"
+            PLATFORMS=$(echo "$PLATFORMS" | jq --arg url "$url" --arg sig "$sig" --arg k "$key" '. + {($k): {signature: $sig, url: $url}}')
+            echo "  + $key -> $fname"
+          }
+
+          WIN_EXE=$(find artifacts -name 'Hostlyy_*_x64-setup.exe' | head -1)
+          MAC_ARM_TGZ=$(find artifacts -path '*macos-arm64*' -name 'Hostly.app.tar.gz' | head -1)
+          MAC_X64_TGZ=$(find artifacts -path '*macos-x64*' -name 'Hostly.app.tar.gz' | head -1)
+          LINUX_APPIMAGE=$(find artifacts -name 'Hostlyy_*_amd64.AppImage' | head -1)
+
+          add_platform "windows-x86_64"  "$WIN_EXE"
+          add_platform "darwin-aarch64"  "$MAC_ARM_TGZ"
+          add_platform "darwin-x86_64"   "$MAC_X64_TGZ"
+          add_platform "linux-x86_64"    "$LINUX_APPIMAGE"
+
+          # 拼 latest.json(notes 由下个 step 注入)
+          jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$PUB_DATE" \
+            --argjson platforms "$PLATFORMS" \
+            '{version: $version, pub_date: $pub_date, platforms: $platforms}' > artifacts/latest.json
+          echo "--- generated latest.json (without notes) ---"
+          cat artifacts/latest.json
 
       # signer sign 不填 notes 字段,这里把 release_notes.md 注入到 latest.json
       # 这样客户端 updater.check() 拿到的 update.notes 就有内容,能显示更新日志
       - name: Inject release notes into latest.json
         if: always() && hashFiles('release_notes.md') != ''
         run: |
-          # 找到 latest.json(signer sign 默认写在当前目录,但我们 cwd 是 repo 根)
-          LJ=$(find artifacts -name 'latest.json' | head -1)
-          if [ -z "$LJ" ]; then
+          LJ="artifacts/latest.json"
+          if [ ! -f "$LJ" ]; then
             echo "no latest.json found, skipping notes injection"
             exit 0
           fi
           echo "Patching: $LJ"
-          # 用 jq 把 release_notes.md 作为 JSON 字符串塞到 notes 字段
           NOTES=$(jq -Rs . < release_notes.md)
           jq --argjson notes "$NOTES" '.notes = $notes' "$LJ" > "$LJ.tmp"
           mv "$LJ.tmp" "$LJ"

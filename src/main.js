@@ -989,7 +989,7 @@ if (aboutCopyGithub) {
 // 启动检查 + 手动检查共用同一套配置;首次安装未改过设置时默认走直连(海外/能上 GitHub 不打扰)
 const PROXY_USE_KEY = 'hostly-update-use-proxy';
 const PROXY_BASE_KEY = 'hostly-update-proxy-base';
-const PROXY_BASE_DEFAULT = 'https://ghproxy.com/';
+const PROXY_BASE_DEFAULT = 'https://ghfast.top/';
 
 function getProxySettings() {
     return {

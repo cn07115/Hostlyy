@@ -246,18 +246,23 @@ fn rebuild_tray_menu(app: &tauri::AppHandle) {
         None => return,
     };
 
-    // Load profile list. On error, fall back to an empty submenu.
+    // Load profile list + active ids. On error, fall back to an empty submenu.
     let ctx = storage::Context::Tauri(app);
-    let profiles: Vec<(String, String)> = match storage::load_config_internal(&ctx) {
-        Ok(cfg) => cfg
-            .profiles
-            .into_iter()
-            .map(|p| (p.id, p.name))
-            .collect(),
-        Err(_) => Vec::new(),
-    };
+    let (profiles, active_ids): (Vec<(String, String)>, std::collections::HashSet<String>) =
+        match storage::load_config_internal(&ctx) {
+            Ok(cfg) => {
+                let active = cfg.active_profile_ids.into_iter().collect();
+                let ps = cfg
+                    .profiles
+                    .into_iter()
+                    .map(|p| (p.id, p.name))
+                    .collect();
+                (ps, active)
+            }
+            Err(_) => (Vec::new(), std::collections::HashSet::new()),
+        };
 
-    // Build the hosts submenu with SubmenuBuilder
+    // Build the hosts submenu with SubmenuBuilder;active 项 label 前加 ✓ 标记
     let mut builder = SubmenuBuilder::new(app, "快捷选择 hosts");
     if profiles.is_empty() {
         if let Ok(item) = MenuItem::with_id(app, "profile:empty", "（暂无配置）", false, None::<&str>) {
@@ -265,11 +270,16 @@ fn rebuild_tray_menu(app: &tauri::AppHandle) {
         }
     } else {
         for (id, name) in &profiles {
-            let label = if name.is_empty() { id.as_str() } else { name.as_str() };
+            let base_label = if name.is_empty() { id.as_str() } else { name.as_str() };
+            let display = if active_ids.contains(id) {
+                format!("✓ {}", base_label)
+            } else {
+                base_label.to_string()
+            };
             if let Ok(item) = MenuItem::with_id(
                 app,
                 format!("profile:{}", id),
-                label,
+                display,
                 true,
                 None::<&str>,
             ) {

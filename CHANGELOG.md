@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-06-04
+
+### 修复 (Fixed)
+- **Tauri 自动更新从 v1.3.0 起一直没工作**:`tauri-apps/cli signer sign` 命令**不生成** `latest.json`(它只产 `.sig` 文件),build.yml 之前依赖这一步产 latest.json 是错的。手动拼 latest.json(收集所有 `.sig` + 对应 installer URL,生成完整 manifest),同时修 Sign installers step 的 file pattern 从 `Hostly_*` 改 `Hostlyy_*`(有 y 才是产品名,旧 pattern 找不到 Windows installer,Windows .sig 一直缺)。装 v1.3.4 之后 `updater.check()` 能拉到 valid JSON,自动更新链路打通。
+- **托盘右键子菜单"已选择"无标记**:`rebuild_tray_menu` 读 `active_profile_ids`,active profile 的 label 前加 `✓ ` 前缀(在子菜单里能看到当前启用的环境)。
+
+### 变更 (Changed)
+- 默认代理地址 `https://ghproxy.com/` → `https://ghfast.top/`(ghproxy.com 在很多 ISP 已 TCP 不通,ghfast.top 走 Cloudflare 较稳)。
+- **修 macOS updater tar.gz 步骤**:v1.3.3 release 缺 `Hostly.app.tar.gz`(原 `artifacts/**/Hostly.app` glob 没匹配到),Tauri macOS updater 一直不可用。改为显式遍历多个常见路径 + 加 `set -x` + 打印 artifacts/ 目录结构,下次 CI log 能看到 .app 真实位置。
+
 ## [1.3.3] - 2026-06-04
 
 ### 修复 (Fixed)
