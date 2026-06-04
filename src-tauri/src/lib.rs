@@ -11,7 +11,7 @@ use tauri::{
     Manager,
     Emitter,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    menu::{Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder},
+    menu::{Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder, CheckMenuItem},
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -24,6 +24,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--autostarted"]),
         ))
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             if cli::run_cli(Some(&app.handle())) {
                 std::process::exit(0);
@@ -51,6 +52,26 @@ pub fn run() {
                 }
             }
 
+            // 显式请求系统通知权限(Windows 10/11 第一次会弹 "是否允许此应用发送通知"
+            // 对话框, 用户选"是"永久有效; macOS 第一次走系统设置里授权)。
+            // 不调的话 tauri-plugin-notification 在某些 Windows 10 旧版上会静默失败
+            // (show() 返回 Ok 但实际 toast 不出, 用户感知是"通知不弹")。
+            {
+                use tauri_plugin_notification::NotificationExt;
+                match app.notification().request_permission() {
+                    Ok(state) => {
+                        use tauri_plugin_notification::PermissionState;
+                        match state {
+                            PermissionState::Granted => println!("✓ 系统通知权限已授权"),
+                            PermissionState::Denied => eprintln!("⚠️ 系统通知权限被拒, 托盘切换不会弹 toast (请到系统设置 → 系统 → 通知 → Hostlyy 打开)"),
+                            PermissionState::Prompt => println!("ℹ️ 系统通知权限待用户确认(下次 .show() 会弹对话框)"),
+                            PermissionState::PromptWithRationale => println!("ℹ️ 系统通知需要 rationale 说明, 下次 .show() 会弹对话框 (Android only)"),
+                        }
+                    }
+                    Err(e) => eprintln!("请求通知权限失败: {}", e),
+                }
+            }
+
             let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
@@ -71,13 +92,62 @@ pub fn run() {
                             app.exit(0);
                         }
                         id if id.starts_with("profile:") => {
-                            // 托盘子菜单点击:把 profile id 发到前端,前端切换编辑器内容
+                            // 托盘子菜单点击:在 Rust 端直接 toggle 该 profile 的 active 状态
+                            // (走 multi_select 规则: 多选 toggle, 单选 设为唯一 active / 再点关掉,
+                            // 跟前端主界面 checkbox 行为完全一致)。
+                            //
+                            // **不弹主窗口**:之前 window.show() + set_focus() 会把主窗口抢到前台,
+                            // user 要的反馈是 "从托盘弹消息" (系统通知), 不是抢主窗口到屏幕中央。
+                            //
+                            // **不发 tray-select-profile 事件**:前端不再需要 toggle / open editor,
+                            // 只需要在主窗口已经开的情况下刷新 sidebar profile 列表。
                             let profile_id = id.trim_start_matches("profile:").to_string();
-                            let _ = app.emit("tray-select-profile", profile_id);
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
+
+                            // 拿 profile 名字用于通知(优先 name, 空就用 id)
+                            let name = {
+                                let ctx = storage::Context::Tauri(app);
+                                storage::load_config_internal(&ctx)
+                                    .ok()
+                                    .and_then(|cfg| cfg.profiles.into_iter().find(|p| p.id == profile_id))
+                                    .map(|p| if p.name.is_empty() { p.id.clone() } else { p.name })
+                                    .unwrap_or_else(|| profile_id.clone())
+                            };
+
+                            // 调 toggle (它内部已经会 rebuild_tray_menu 同步 ✓ 标记 + apply_config 写 hosts)
+                            if let Err(e) = storage::toggle_profile_active(app.clone(), profile_id.clone()) {
+                                eprintln!("⚠️ 托盘 toggle 失败: {} (这一调用该写 hosts + 同步托盘 ✓, 任一失败都会在这里打 log)", e);
                             }
+
+                            // 读 toggle 后的新 active 状态, 文案区分 "已启用" / "已禁用"
+                            // (toggle_profile_active_internal 已经更新 config, 读磁盘拿新 state)
+                            let new_active = {
+                                let ctx = storage::Context::Tauri(app);
+                                storage::load_config_internal(&ctx)
+                                    .ok()
+                                    .and_then(|cfg| cfg.profiles.into_iter().find(|p| p.id == profile_id))
+                                    .map(|p| p.active)
+                                    .unwrap_or(false)
+                            };
+                            let action = if new_active { "已启用" } else { "已禁用" };
+
+                            // 发系统通知 (Windows: WinRT toast, macOS: NSUserNotification,
+                            // Linux: libnotify),不依赖主窗口可见。
+                            // **关于停留时间**: tauri-plugin-notification 没暴露 duration API,
+                            // Windows toast 默认 5s (系统设置 → 辅助功能 → 视觉效果 → 通知
+                            // 持续时间可调, 但 Windows 11 不支持短于 5s)。
+                            use tauri_plugin_notification::NotificationExt;
+                            if let Err(e) = app
+                                .notification()
+                                .builder()
+                                .title("Hostlyy")
+                                .body(format!("{} {}", action, name))
+                                .show()
+                            {
+                                eprintln!("⚠️ 系统通知发送失败: {} (Windows: 检查设置 → 系统 → 通知 → Hostlyy 是否打开)", e);
+                            }
+
+                            // 发个事件给前端,如果主窗口正好开着,sidebar profile 列表刷新一下
+                            let _ = app.emit("tray-select-profile", profile_id);
                         }
                         _ => {}
                     }
@@ -246,41 +316,39 @@ pub fn rebuild_tray_menu(app: &tauri::AppHandle) {
         None => return,
     };
 
-    // Load profile list + active ids. On error, fall back to an empty submenu.
+    // Load profile list. 直接从 profiles[i].active derive active set,
+    // 不要读 active_profile_ids (v1.3.5 之前根本没同步, 老 user 装 v1.3.6+
+    // 启动时 active_profile_ids 为空 → 托盘一个 ✓ 都不显示)。
+    // profiles[i].active 才是 source of truth (apply_config 用这个)。
     let ctx = storage::Context::Tauri(app);
-    let (profiles, active_ids): (Vec<(String, String)>, std::collections::HashSet<String>) =
-        match storage::load_config_internal(&ctx) {
-            Ok(cfg) => {
-                let active = cfg.active_profile_ids.into_iter().collect();
-                let ps = cfg
-                    .profiles
-                    .into_iter()
-                    .map(|p| (p.id, p.name))
-                    .collect();
-                (ps, active)
-            }
-            Err(_) => (Vec::new(), std::collections::HashSet::new()),
-        };
+    let profiles: Vec<(String, String, bool)> = match storage::load_config_internal(&ctx) {
+        Ok(cfg) => cfg
+            .profiles
+            .into_iter()
+            .map(|p| (p.id, p.name, p.active))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
 
-    // Build the hosts submenu with SubmenuBuilder;active 项 label 前加 ✓ 标记
+    // Build the hosts submenu with SubmenuBuilder。active 项用 CheckMenuItem,
+    // 让 Windows 渲染 native checkbox (✓ 在左边状态列, 文字在右) — 所有项
+    // 状态列宽一致, 不会再有"inactive 项左列空一截"看着像 bug 的视觉。
+    // 之前用 MenuItem + "[✓] " 文字前缀, Windows 给所有项保留状态列宽
+    // (因为有 ✓ 字符), 但 inactive 项的列是空的, 看着别扭。
     let mut builder = SubmenuBuilder::new(app, "快捷选择 hosts");
     if profiles.is_empty() {
         if let Ok(item) = MenuItem::with_id(app, "profile:empty", "（暂无配置）", false, None::<&str>) {
             builder = builder.item(&item);
         }
     } else {
-        for (id, name) in &profiles {
+        for (id, name, active) in &profiles {
             let base_label = if name.is_empty() { id.as_str() } else { name.as_str() };
-            let display = if active_ids.contains(id) {
-                format!("✓ {}", base_label)
-            } else {
-                base_label.to_string()
-            };
-            if let Ok(item) = MenuItem::with_id(
+            if let Ok(item) = CheckMenuItem::with_id(
                 app,
                 format!("profile:{}", id),
-                display,
+                base_label,
                 true,
+                *active,
                 None::<&str>,
             ) {
                 builder = builder.item(&item);
@@ -339,8 +407,23 @@ fn exit_app(app: tauri::AppHandle) {
 /// 走代理检查更新:用 minreq 拉 latest.json,sed 替换当前 OS 对应 platform 的 url
 /// 走代理,返回 { version, url }。前端拿到 url 后调 hostly_open_url,让系统默认
 /// 浏览器/下载工具接管。
+///
+/// **async + tokio::task::spawn_blocking**:minreq 是 sync 阻塞 IO,直接在这个
+/// 函数里调会冻住 Tauri 主线程,导致检查更新期间整个 UI 不响应鼠标键盘
+/// (最多 15s timeout)。把 minreq 调用丢到 tokio 的 blocking thread pool,
+/// 主线程立即释放,UI 不卡。普通 `async fn` 不够 — Tauri async command 还是要
+/// 等 await 完成,只是 command 本身能并发。必须 `spawn_blocking` 才能让主线程
+/// 在 IO 期间继续处理其他 command (UI 渲染 / 托盘 click 等)。
 #[tauri::command]
-fn check_update_with_proxy(proxy_base: String) -> Result<serde_json::Value, String> {
+async fn check_update_with_proxy(proxy_base: String) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || check_update_with_proxy_blocking(&proxy_base))
+        .await
+        .map_err(|e| format!("代理检查更新后台任务 join 失败: {}", e))?
+}
+
+/// sync 版本的检查更新逻辑(被 check_update_with_proxy 通过 spawn_blocking 调用)。
+/// 全部用 minreq 阻塞 IO,放在 tokio blocking thread pool 里跑,主线程不卡。
+fn check_update_with_proxy_blocking(proxy_base: &str) -> Result<serde_json::Value, String> {
     let base = proxy_base.trim().trim_end_matches('/');
     if base.is_empty() {
         return Err("代理地址不能为空".to_string());
