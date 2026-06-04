@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Hostlyy v{{version}}",
+        "title": "Hostlyy",
         "width": 800,
         "height": 600,
         "visible": false,

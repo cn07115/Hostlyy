@@ -31,6 +31,14 @@ pub fn run() {
 
             let window = app.get_webview_window("main").unwrap();
 
+            // tauri 2 不替换 tauri.conf.json title 里的 {{version}} 模板;
+            // 运行时把版本号拼进标题
+            let title = format!(
+                "Hostlyy v{}",
+                app.package_info().version
+            );
+            let _ = window.set_title(&title);
+
             #[cfg(target_os = "windows")]
             {
                 let _ = apply_mica(&window, Some(true));
