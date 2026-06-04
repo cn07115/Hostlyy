@@ -590,7 +590,9 @@ pub fn rename_profile_internal(ctx: &Context, id: &str, new_name: String) -> Res
 #[tauri::command]
 pub fn toggle_profile_active(app: AppHandle, id: String) -> Result<(), String> {
     toggle_profile_active_internal(&Context::Tauri(&app), &id)?;
-    apply_config(app)?;
+    apply_config(app.clone())?;
+    // 同步托盘菜单 ✓ 标记(读 active_profile_ids,toggle 后已 sync 过)
+    crate::rebuild_tray_menu(&app);
     crate::webdav::schedule_sync();
     Ok(())
 }
@@ -621,8 +623,23 @@ pub fn toggle_profile_active_internal(ctx: &Context, id: &str) -> Result<(), Str
             }
         }
     }
-    
+
+    // 同步 active_profile_ids (托盘 ✓ 标记读这个),否则托盘不更新
+    sync_active_profile_ids(&mut config);
+
     save_config_internal(ctx, &config)
+}
+
+/// Sync active_profile_ids (Vec<String>) with profiles[i].active (per-profile bool).
+/// MUST be called after any code path that flips profiles[i].active, otherwise the
+/// tray menu's ✓ markers (which read active_profile_ids) will go stale.
+fn sync_active_profile_ids(config: &mut AppConfig) {
+    config.active_profile_ids = config
+        .profiles
+        .iter()
+        .filter(|p| p.active)
+        .map(|p| p.id.clone())
+        .collect();
 }
 
 #[tauri::command]
@@ -650,7 +667,10 @@ pub fn set_multi_select_internal(ctx: &Context, enable: bool) -> Result<(), Stri
             }
         }
     }
-    
+
+    // 同步 active_profile_ids (托盘 ✓ 标记读这个)
+    sync_active_profile_ids(&mut config);
+
     save_config_internal(ctx, &config)
 }
 

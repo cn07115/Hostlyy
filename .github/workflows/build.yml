@@ -112,17 +112,17 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           mkdir -p artifacts
-          # 不写死 target/<triple>/release/bundle/macos/Hostly.app 路径——
+          # 不写死 target/<triple>/release/bundle/macos/Hostlyy.app 路径——
           # Tauri 2 在 macos-latest M1 runner 上 + --target aarch64-apple-darwin 时
           # 实际产物可能在 target/<triple>/ 或 target/ (host==target) 任一路径,
           # 用 find 鲁棒匹配所有可能的 layout
-          find src-tauri/target -name 'Hostly.app' -type d -exec cp -R {} artifacts/ \; 2>/dev/null || true
+          find src-tauri/target -name 'Hostlyy.app' -type d -exec cp -R {} artifacts/ \; 2>/dev/null || true
           find src-tauri/target -name '*.dmg' -exec cp {} artifacts/ \; 2>/dev/null || true
           # 调试:把实际拷贝结果打出来,CI log 可见
           echo "--- artifacts/ after stage ---"
           ls -la artifacts/ || true
-          echo "--- Hostly.app inside artifacts ---"
-          find artifacts -name 'Hostly.app' -type d -print || true
+          echo "--- Hostlyy.app inside artifacts ---"
+          find artifacts -name 'Hostlyy.app' -type d -print || true
 
       - name: Stage artifacts (Linux)
         if: runner.os == 'Linux'
@@ -181,17 +181,17 @@ jobs:
       - name: Tar macOS .app bundles for updater
         run: |
           set -x
-          # 调试:打印 artifacts/ 实际目录结构,方便定位 Hostly.app 真实位置
+          # 调试:打印 artifacts/ 实际目录结构,方便定位 Hostlyy.app 真实位置
           echo "--- artifacts/ tree ---"
           find artifacts -maxdepth 3 -type d -print
-          echo "--- Hostly.app candidates ---"
-          find artifacts -name 'Hostly.app' -type d -print
-          # 用 find 找所有 Hostly.app 目录,逐个打成 .tar.gz(不写死路径,鲁棒匹配各种 CI 布局)
-          find artifacts -name 'Hostly.app' -type d | while read -r app; do
+          echo "--- Hostlyy.app candidates ---"
+          find artifacts -name 'Hostlyy.app' -type d -print
+          # 用 find 找所有 Hostlyy.app 目录,逐个打成 .tar.gz(不写死路径,鲁棒匹配各种 CI 布局)
+          find artifacts -name 'Hostlyy.app' -type d | while read -r app; do
             tar -czf "${app}.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
           done
           echo "--- produced tar.gz ---"
-          find artifacts -name 'Hostly.app.tar.gz' -print
+          find artifacts -name 'Hostlyy.app.tar.gz' -print
 
       - name: Sign installers
         env:
@@ -201,8 +201,8 @@ jobs:
           set -e
           # 定位每个平台的安装包(Hostlyy 带 y 是产品名;版本号在文件名里,需要通配)
           WIN_EXE=$(find artifacts -name 'Hostlyy_*_x64-setup.exe' | head -1)
-          MAC_ARM_TGZ=$(find artifacts -path '*macos-arm64*' -name 'Hostly.app.tar.gz' | head -1)
-          MAC_X64_TGZ=$(find artifacts -path '*macos-x64*' -name 'Hostly.app.tar.gz' | head -1)
+          MAC_ARM_TGZ=$(find artifacts -path '*macos-arm64*' -name 'Hostlyy.app.tar.gz' | head -1)
+          MAC_X64_TGZ=$(find artifacts -path '*macos-x64*' -name 'Hostlyy.app.tar.gz' | head -1)
           LINUX_APPIMAGE=$(find artifacts -name 'Hostlyy_*_amd64.AppImage' | head -1)
           echo "Windows: $WIN_EXE"
           echo "macOS arm64: $MAC_ARM_TGZ"
@@ -257,8 +257,8 @@ jobs:
           }
 
           WIN_EXE=$(find artifacts -name 'Hostlyy_*_x64-setup.exe' | head -1)
-          MAC_ARM_TGZ=$(find artifacts -path '*macos-arm64*' -name 'Hostly.app.tar.gz' | head -1)
-          MAC_X64_TGZ=$(find artifacts -path '*macos-x64*' -name 'Hostly.app.tar.gz' | head -1)
+          MAC_ARM_TGZ=$(find artifacts -path '*macos-arm64*' -name 'Hostlyy.app.tar.gz' | head -1)
+          MAC_X64_TGZ=$(find artifacts -path '*macos-x64*' -name 'Hostlyy.app.tar.gz' | head -1)
           LINUX_APPIMAGE=$(find artifacts -name 'Hostlyy_*_amd64.AppImage' | head -1)
 
           add_platform "windows-x86_64"  "$WIN_EXE"

@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+## [1.3.6] - 2026-06-05
+
+### 修复 (Fixed)
+- **走代理检查更新报"拉取 latest.json 失败: was redirected to an absolute url with an invalid protocol"**:v1.3.5 修了 URL 拼接漏 `/` 的 11001 DNS bug 后,新错来了。根因:`gh.xmly.dev` / `kkgithub` / `ghproxy` / `ghfast` 见到 `releases/latest/download/latest.json` 都会 **302 跳到** `releases/download/vX.Y.Z/latest.json`,`Location` 头是 `/https://github.com/...` (path-relative)。minreq 默认会 follow redirect,但**错把 path-relative 当 absolute URL 解析**,提取 scheme `https:` + 把 `//github.com/...` 当 host(带 `/` 非法),报"invalid protocol"。修法:`minreq::get(url).with_max_redirects(0)` 禁掉自动 redirect,自己手动 follow(最多 3 次防循环),新加 `resolve_redirect()` helper 处理 absolute / path-relative redirect target。
+- **macOS 自动更新从 v1.3.0 起一直没修好**(v1.3.5 修了但没修对):v1.3.6 release `latest.json` 仍然只 windows + linux,缺 darwin 平台。根因:`tauri.conf.json` 的 `productName: "Hostlyy"`(有 y),macOS 实际 build 产出 `.app` bundle 叫 **`Hostlyy.app`**(有 y),但 `build.yml` 9 处全用 `Hostly.app`(无 y)→ `find -name 'Hostly.app'` 永远找不到 → `cp -R` 不执行 → `tar` 跳过 → `signer sign` 跳过 → `add_platform` 跳过 darwin → `latest.json` 没 darwin 节点。跟 v1.3.4 修 Windows installer 时的 typo `Hostly_*` → `Hostlyy_*` 是同一类 bug,只是 v1.3.5 改 path 写法时**没改名字**。修法:全部 `sed s/Hostly\.app/Hostlyy\.app/g`。
+- **Windows 开机自启没起作用**:勾了"开机自启" toast 显示成功,但 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 主键里**根本没 Hostlyy 这个 value**。`tauri-plugin-autostart` 2.5.1 在 Windows 上有 bug:它把"已注册"信息写到了 `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run\Hostlyy` 这个**跟踪表**(值是 `02 00 00 ...` = disabled by user),但**没真写到 Run 主键**,所以 Windows 不会启动它。修法:Windows 平台**绕开 plugin**,用 `winreg` crate 直接写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Hostlyy = "<exe path>" --autostarted`。macOS / Linux 继续用 plugin(那俩平台正常)。
+- **托盘菜单 ✓ 标记不实时同步** + **托盘点击没真的切 host**:v1.3.4 加了 `rebuild_tray_menu` 在 active profile label 前打 `✓`,但**只 startup 时调一次**,切 host 后没再调,托盘一直显示启动时的快照。修法:`storage::toggle_profile_active` 完成后调 `crate::rebuild_tray_menu(&app)`,实时同步托盘 ✓。
+- **托盘点击只打开编辑器,不切 host**:之前 `tray-select-profile` event handler 调 `selectProfile(id)`(只是把 profile 内容显示到编辑器),不调 `toggle_profile_active`,所以托盘点击不会真的切换当前 host 环境。修法:event handler 改成调 `toggleProfile(id)`(走 multi_select 规则:多选 toggle,单选 设为唯一 active / 再点关掉)+ 同时 `selectProfile(id)` 在编辑器里打开给用户看切换效果。
+- **`active_profile_ids` 跟 `profiles[i].active` 不同步**:之前 `toggle_profile_active_internal` 只翻 `profiles[i].active` 标志,从不更新 `active_profile_ids: Vec<String>`,导致 `rebuild_tray_menu` 读 `active_profile_ids` 永远拿不到最新状态(永远是空或者 startup 时的快照)。新加 `sync_active_profile_ids()` helper 在 toggle 后重建 `active_profile_ids`,`set_multi_select_internal` 切换模式后也调一次。
+
 ## [1.3.5] - 2026-06-05
 
 ### 修复 (Fixed)

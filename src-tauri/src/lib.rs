@@ -240,7 +240,7 @@ fn get_app_version(app: tauri::AppHandle) -> String {
 /// Rebuild the tray menu with a fresh "Hosts" submenu listing all profiles.
 /// Called at startup and whenever the profile list changes (frontend triggers
 /// via the `rebuild_tray_menu` command).
-fn rebuild_tray_menu(app: &tauri::AppHandle) {
+pub fn rebuild_tray_menu(app: &tauri::AppHandle) {
     let tray = match app.tray_by_id("main") {
         Some(t) => t,
         None => return,
@@ -348,16 +348,50 @@ fn check_update_with_proxy(proxy_base: String) -> Result<serde_json::Value, Stri
 
     // 拼接 latest.json 的代理 URL(注意 base 和 https:// 之间必须有 / 分隔,
     // 否则 minreq 解析 URL 时把整个 gh.xmly.devhttps://... 当 host, DNS 解析失败 11001)
-    let latest_url = format!(
+    let mut current_url = format!(
         "{}/https://github.com/cn07115/Hostlyy/releases/latest/download/latest.json",
         base
     );
 
-    // 拉 JSON(15s 超时,ghproxy 偶尔慢)
-    let response = minreq::get(&latest_url)
+    // gh.xmly.dev / kkgithub / ghproxy / ghfast 之类的代理,见到
+    // releases/latest/download/latest.json 都会 302 跳到
+    // releases/download/vX.Y.Z/latest.json(具体版本号 URL)。
+    // minreq 默认会自动 follow redirect,但它把 Location: /https://... 这种
+    // path-relative URL 错误当 absolute URL 解析,报"invalid protocol"。
+    // 修法: 禁掉 minreq 自动 redirect,自己处理 302 (最多 3 次, 防循环)。
+    let mut response = minreq::get(&current_url)
         .with_timeout(15)
+        .with_max_redirects(0)
         .send()
         .map_err(|e| format!("拉取 latest.json 失败: {}", e))?;
+
+    let mut redirects_left = 3;
+    while (300..400).contains(&response.status_code) && redirects_left > 0 {
+        let location = response
+            .headers
+            .get("location")
+            .ok_or_else(|| {
+                format!("收到 HTTP {} 但响应没有 Location 头", response.status_code)
+            })?
+            .to_string();
+
+        current_url = resolve_redirect(&current_url, &location)
+            .map_err(|e| format!("follow redirect 失败: {}", e))?;
+
+        response = minreq::get(&current_url)
+            .with_timeout(15)
+            .with_max_redirects(0)
+            .send()
+            .map_err(|e| format!("follow redirect 失败: {}", e))?;
+        redirects_left -= 1;
+    }
+
+    if !(200..300).contains(&response.status_code) {
+        return Err(format!(
+            "拉取 latest.json 失败: HTTP {} (final URL: {})",
+            response.status_code, current_url
+        ));
+    }
 
     let body = response
         .as_str()
@@ -420,6 +454,31 @@ fn check_update_with_proxy(proxy_base: String) -> Result<serde_json::Value, Stri
         "notes": notes,
         "url": proxied_url,
     }))
+}
+
+/// 解析 302 redirect: absolute URL → 直接用;path-relative (Location: /...) → 跟
+/// current_url 同 origin 拼起来。gh.xmly.dev 走的就是 path-relative, minreq 不会自己
+/// 处理这种,所以我们手动拼。
+fn resolve_redirect(current: &str, location: &str) -> Result<String, String> {
+    if location.starts_with("http://") || location.starts_with("https://") {
+        return Ok(location.to_string());
+    }
+    if location.starts_with('/') {
+        let scheme_end = current
+            .find("://")
+            .ok_or_else(|| format!("invalid current URL (no scheme): {}", current))?;
+        let after_scheme = &current[scheme_end + 3..];
+        let path_start = after_scheme.find('/');
+        let origin = match path_start {
+            Some(i) => &current[..scheme_end + 3 + i],
+            None => current,
+        };
+        return Ok(format!("{}{}", origin, location));
+    }
+    Err(format!(
+        "unsupported redirect target: {} (current: {})",
+        location, current
+    ))
 }
 
 // ============================ WebDAV Sync ============================

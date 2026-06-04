@@ -1407,10 +1407,19 @@ if (tauri.event && typeof tauri.event.listen === 'function') {
         const msg = event.payload || '未知错误';
         showToast(`WebDAV: ${msg}`, 'error');
     });
-    // 托盘子菜单点击:把对应 profile 切到编辑器
+    // 托盘子菜单点击:toggle 该 profile 的 active 状态(走 multi_select 规则:
+    //   multi_select=true  → toggle 它的 active
+    //   multi_select=false → 设为唯一 active(再点一次关掉)
+    // )+ 同时在编辑器打开它(让用户看到切换效果)
     tauri.event.listen('tray-select-profile', (event) => {
         const id = event.payload;
-        if (id) selectProfile(id);
+        if (!id) return;
+        if (id === 'system' || id === 'common') {
+            selectProfile(id);
+        } else {
+            toggleProfile(id);
+            selectProfile(id);
+        }
     });
 }
 

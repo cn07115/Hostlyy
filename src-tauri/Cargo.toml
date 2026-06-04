@@ -55,6 +55,11 @@ once_cell = "1"
 open = "5"
 sha2 = "0.10"
 
+# Windows 自启动直接调 winreg 写 HKCU\...\Run\Hostlyy,
+# 绕开 tauri-plugin-autostart 2.5.1 的 bug(只写 StartupApproved\Run 不写 Run 主键)。
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.52"
+
 [profile.release]
 opt-level = "z"     # Optimize for size
 lto = true           # Enable Link Time Optimization
