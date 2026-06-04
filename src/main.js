@@ -989,7 +989,7 @@ if (aboutCopyGithub) {
 // 启动检查 + 手动检查共用同一套配置;首次安装未改过设置时默认走直连(海外/能上 GitHub 不打扰)
 const PROXY_USE_KEY = 'hostly-update-use-proxy';
 const PROXY_BASE_KEY = 'hostly-update-proxy-base';
-const PROXY_BASE_DEFAULT = 'https://ghfast.top/';
+const PROXY_BASE_DEFAULT = 'https://gh.xmly.dev/';
 
 function getProxySettings() {
     return {
@@ -1012,6 +1012,13 @@ const aboutProxyBaseInput = document.getElementById('about-proxy-base-input');
 // 打开设置面板时把 localStorage 同步到 UI
 function initUpdateProxyUI() {
     if (!aboutUseProxyCheckbox || !aboutProxyBaseInput) return;
+    // 一次性迁移:老默认(ghproxy.com / ghfast.top)-> 新默认(gh.xmly.dev)
+    // 精确匹配,不误伤用户手动填的值
+    const stored = localStorage.getItem(PROXY_BASE_KEY);
+    const oldDefaults = ['https://ghproxy.com/', 'https://ghfast.top/'];
+    if (stored && oldDefaults.includes(stored)) {
+        localStorage.setItem(PROXY_BASE_KEY, PROXY_BASE_DEFAULT);
+    }
     const { useProxy, proxyBase } = getProxySettings();
     aboutUseProxyCheckbox.checked = useProxy;
     aboutProxyBaseInput.value = proxyBase;

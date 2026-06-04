@@ -101,10 +101,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Copy-Item src-tauri/target/release/hostly.exe -Destination artifacts/hostly-gui-elevated-${{ matrix.target }}.exe
-          Copy-Item src-tauri/target/release/hostly-cli-elevated.exe -Destination artifacts/hostly-cli-elevated-${{ matrix.target }}.exe
-          Copy-Item src-tauri/target/release/hostly-core.exe -Destination artifacts/hostly-core-${{ matrix.target }}.exe
-          # Pull in both MSI and NSIS installers from the bundle output
+          # 拉 NSIS installer + MSI installer (这俩是用户真正要下载的,
+          # raw 编译产物 hostly.exe / hostly-cli-elevated.exe / hostly-core.exe
+          # 都已经打包进 NSIS installer 里了,不再单独 stage)
           Get-ChildItem src-tauri/target/release/bundle -Recurse -File |
             Where-Object { $_.Extension -in '.msi' -or $_.Name -like '*-setup.exe' } |
             Copy-Item -Destination artifacts/
@@ -113,16 +112,22 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           mkdir -p artifacts
-          cp -R src-tauri/target/${{ matrix.target }}/release/bundle/macos/Hostly.app artifacts/ || true
-          cp src-tauri/target/${{ matrix.target }}/release/hostly-core artifacts/hostly-core || true
-          find src-tauri/target/${{ matrix.target }}/release/bundle -name '*.dmg' -exec cp {} artifacts/ \; 2>/dev/null || true
+          # 不写死 target/<triple>/release/bundle/macos/Hostly.app 路径——
+          # Tauri 2 在 macos-latest M1 runner 上 + --target aarch64-apple-darwin 时
+          # 实际产物可能在 target/<triple>/ 或 target/ (host==target) 任一路径,
+          # 用 find 鲁棒匹配所有可能的 layout
+          find src-tauri/target -name 'Hostly.app' -type d -exec cp -R {} artifacts/ \; 2>/dev/null || true
+          find src-tauri/target -name '*.dmg' -exec cp {} artifacts/ \; 2>/dev/null || true
+          # 调试:把实际拷贝结果打出来,CI log 可见
+          echo "--- artifacts/ after stage ---"
+          ls -la artifacts/ || true
+          echo "--- Hostly.app inside artifacts ---"
+          find artifacts -name 'Hostly.app' -type d -print || true
 
       - name: Stage artifacts (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p artifacts
-          cp src-tauri/target/release/hostly artifacts/hostly-bin || true
-          cp src-tauri/target/release/hostly-core artifacts/hostly-core || true
           find src-tauri/target/release/bundle -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' |
             xargs -I {} cp {} artifacts/ 2>/dev/null || true
 

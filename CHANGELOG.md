@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-06-05
+
+### 修复 (Fixed)
+- **走代理检查更新永远报"拉取 latest.json 失败: 不知道这样的主机 (os error 11001)"**:Rust 端 `check_update_with_proxy` 拼接 URL 时 `format!("{}...", base)` **漏了 `/` 分隔**,拼出 `https://gh.xmly.devhttps://github.com/...` 这种畸形 URL。minreq 解析时把 `gh.xmly.devhttps://...` 整个当 host,DNS 解析失败 11001。修法: `format!("{}/...", base)` 显式加 `/`。
+- **macOS 自动更新从 v1.3.0 起一直不可用**:v1.3.4 release assets 里两个 macOS 平台**都没有 `Hostly.app.tar.gz`**(也没有 `.sig`),所以 `latest.json` 里**没 darwin-aarch64 / darwin-x86_64 平台**,Tauri macOS updater 始终拿不到更新。根因:`build.yml` macOS Stage artifacts 步用写死 path `cp -R src-tauri/target/${{ matrix.target }}/release/bundle/macos/Hostly.app artifacts/`,在 macos-latest M1 runner 上 `host==aarch64-apple-darwin` 时 cargo 会用 `target/release/bundle/...` 而非 `target/aarch64-apple-darwin/release/bundle/...` 写产物,cp 静默失败被 `|| true` 吞掉。修法:改成 `find src-tauri/target -name 'Hostly.app' -type d -exec cp -R {} artifacts/ \;`,匹配 Tauri 2 在两种 layout 下的产物路径(同时打印 `artifacts/` 和 `find` 结果,下次 CI log 直接看到 `.app` 实际位置)。
+
+### 变更 (Changed)
+- 默认代理地址 `https://ghfast.top/` → `https://gh.xmly.dev/`(经实测 gh.xmly.dev 在大陆 ISP 通)。
+- 加 localStorage 一次性迁移:从老默认 `https://ghproxy.com/` / `https://ghfast.top/` 升级的 user,首次打开设置自动切到新默认(精确字符串匹配,不动用户手动填的值)。
+- **清掉 release 里没用的 raw 编译产物**:build.yml 的 Stage artifacts 步不再 copy 3 个 Windows raw `.exe`(`hostly-gui-elevated` / `hostly-cli-elevated` / `hostly-core`,NSIS installer 里已经包含,占 8 MB),也不再 copy 2 个 Linux raw bin(`hostly-bin` / `hostly-core`,因为 softprops `files:` glob 不匹配无扩展名文件,从来没上传成功过,dead code),macOS 的 `hostly-core` 同理也删。Release 体积更小,列表更干净。
+
 ## [1.3.4] - 2026-06-04
 
 ### 修复 (Fixed)

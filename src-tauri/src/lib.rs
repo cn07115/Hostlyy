@@ -346,9 +346,10 @@ fn check_update_with_proxy(proxy_base: String) -> Result<serde_json::Value, Stri
         return Err("代理地址不能为空".to_string());
     }
 
-    // 拼接 latest.json 的代理 URL
+    // 拼接 latest.json 的代理 URL(注意 base 和 https:// 之间必须有 / 分隔,
+    // 否则 minreq 解析 URL 时把整个 gh.xmly.devhttps://... 当 host, DNS 解析失败 11001)
     let latest_url = format!(
-        "{}https://github.com/cn07115/Hostlyy/releases/latest/download/latest.json",
+        "{}/https://github.com/cn07115/Hostlyy/releases/latest/download/latest.json",
         base
     );
 
