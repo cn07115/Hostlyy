@@ -194,14 +194,14 @@ jobs:
           echo "macOS arm64: $MAC_ARM_TGZ"
           echo "macOS x64: $MAC_X64_TGZ"
           echo "Linux: $LINUX_APPIMAGE"
-          # 拼 base URL:所有 artifact 共享 GitHub release 的下载前缀
-          BASE="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
-          ARGS=()
-          [ -n "$WIN_EXE" ]      && ARGS+=(-b "$BASE/$(basename "$WIN_EXE")")
-          [ -n "$MAC_ARM_TGZ" ]  && ARGS+=(-b "$BASE/$(basename "$MAC_ARM_TGZ")")
-          [ -n "$MAC_X64_TGZ" ]  && ARGS+=(-b "$BASE/$(basename "$MAC_X64_TGZ")")
-          [ -n "$LINUX_APPIMAGE" ] && ARGS+=(-b "$BASE/$(basename "$LINUX_APPIMAGE")")
-          npx @tauri-apps/cli signer sign "${ARGS[@]}"
+          # tauri 2.11+ 的 signer sign 改用位置参数(不要 -b);URL 自动从 tauri.conf.json
+          # 的 endpoint 拼接(把 latest 替换成当前 tag)
+          FILES=()
+          [ -n "$WIN_EXE" ]       && FILES+=("$WIN_EXE")
+          [ -n "$MAC_ARM_TGZ" ]   && FILES+=("$MAC_ARM_TGZ")
+          [ -n "$MAC_X64_TGZ" ]   && FILES+=("$MAC_X64_TGZ")
+          [ -n "$LINUX_APPIMAGE" ] && FILES+=("$LINUX_APPIMAGE")
+          npx @tauri-apps/cli signer sign "${FILES[@]}"
 
       # signer sign 不填 notes 字段,这里把 release_notes.md 注入到 latest.json
       # 这样客户端 updater.check() 拿到的 update.notes 就有内容,能显示更新日志

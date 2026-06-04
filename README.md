@@ -7,7 +7,7 @@
 An **ultra-lightweight**, high-performance Hosts management tool built on **Tauri v2 + Rust**. By removing the frontend framework (migrating to Vanilla JS), we have pushed size and performance to the extreme.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/zengyufei/hostly/main/img/index.png" alt="Hostly Main Interface" width="600" />
+  <img src="https://raw.githubusercontent.com/cn07115/Hostlyy/main/img/index.png" alt="Hostlyy Main Interface" width="600" />
 </p>
 
 > 🤖 **Special Note**: This project was deeply designed and implemented with the help of the AI agent, pursuing ultimate simplicity and efficiency.
@@ -45,15 +45,15 @@ An **ultra-lightweight**, high-performance Hosts management tool built on **Taur
 
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/zengyufei/hostly/main/img/common.png" alt="Hostly Main Interface" width="600" />
+  <img src="https://raw.githubusercontent.com/cn07115/Hostlyy/main/img/common.png" alt="Hostlyy Main Interface" width="600" />
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/zengyufei/hostly/main/img/multi.png" alt="Hostly Main Interface" width="600" />
+  <img src="https://raw.githubusercontent.com/cn07115/Hostlyy/main/img/multi.png" alt="Hostlyy Main Interface" width="600" />
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/zengyufei/hostly/main/img/window.png" alt="Hostly Main Interface" width="600" />
+  <img src="https://raw.githubusercontent.com/cn07115/Hostlyy/main/img/window.png" alt="Hostlyy Main Interface" width="600" />
 </p>
 
 
