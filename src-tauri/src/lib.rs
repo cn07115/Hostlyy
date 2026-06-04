@@ -220,6 +220,7 @@ pub fn run() {
             exit_app,
             get_app_version,
             rebuild_tray_menu_cmd,
+            check_update_with_proxy,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -323,6 +324,91 @@ fn hide_to_tray(window: tauri::Window) {
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+/// 走代理检查更新:用 minreq 拉 latest.json,sed 替换当前 OS 对应 platform 的 url
+/// 走代理,返回 { version, url }。前端拿到 url 后调 hostly_open_url,让系统默认
+/// 浏览器/下载工具接管。
+#[tauri::command]
+fn check_update_with_proxy(proxy_base: String) -> Result<serde_json::Value, String> {
+    let base = proxy_base.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("代理地址不能为空".to_string());
+    }
+
+    // 拼接 latest.json 的代理 URL
+    let latest_url = format!(
+        "{}https://github.com/cn07115/Hostlyy/releases/latest/download/latest.json",
+        base
+    );
+
+    // 拉 JSON(15s 超时,ghproxy 偶尔慢)
+    let response = minreq::get(&latest_url)
+        .with_timeout(15)
+        .send()
+        .map_err(|e| format!("拉取 latest.json 失败: {}", e))?;
+
+    let body = response
+        .as_str()
+        .map_err(|e| format!("读取 latest.json 失败: {}", e))?
+        .to_string();
+
+    // 解析
+    let mut json: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("解析 latest.json 失败: {}", e))?;
+
+    // 当前 OS 对应的 platform key(Tauri 2 标准命名)
+    let platform_key = match std::env::consts::OS {
+        "windows" => "windows-x86_64",
+        "macos" => "darwin-x86_64",
+        "linux" => "linux-x86_64",
+        other => return Err(format!("不支持的平台: {}", other)),
+    };
+
+    // 取出原始 url(用 .get_mut 走一遍,顺便做替换)
+    let proxied_url = {
+        let entry = json
+            .get_mut("platforms")
+            .and_then(|p| p.get_mut(platform_key))
+            .ok_or_else(|| {
+                format!("latest.json 缺少 platform {} 节点(可能架构不匹配)", platform_key)
+            })?;
+
+        let url = entry
+            .get("url")
+            .and_then(|u| u.as_str())
+            .ok_or_else(|| "platform 节点缺少 url 字段".to_string())?
+            .to_string();
+
+        if url.contains("https://github.com/cn07115/Hostly") {
+            url.replace(
+                "https://github.com/cn07115/Hostly",
+                &format!("{}/https://github.com/cn07115/Hostly", base),
+            )
+        } else {
+            url
+        }
+    };
+
+    // 取出 version
+    let version = json
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    // 取出 notes(plain text;启动 modal 用来显示更新内容)
+    let notes = json
+        .get("notes")
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Ok(serde_json::json!({
+        "version": version,
+        "notes": notes,
+        "url": proxied_url,
+    }))
 }
 
 // ============================ WebDAV Sync ============================

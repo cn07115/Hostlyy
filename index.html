@@ -315,7 +315,13 @@ https://example2.com/hosts2.txt" rows="3"></textarea>
                     </div>
                     <h4 class="pane-title" style="margin-top: 24px;">检查更新</h4>
                     <div class="form-group">
-                        <div style="display: flex; gap: 8px; align-items: center;">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="about-use-proxy-checkbox">
+                            <span>使用代理检查更新(国内网络推荐)</span>
+                        </label>
+                        <input type="text" id="about-proxy-base-input" value="https://ghproxy.com/" placeholder="https://ghproxy.com/" style="margin-top: 8px;" autocomplete="off" />
+                        <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">勾选后,检查更新走代理;发现新版本会直接用系统默认浏览器/下载工具打开下载链接</p>
+                        <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
                             <button id="about-check-update" class="primary">检查更新</button>
                             <span id="about-update-status" style="font-size: 13px; color: var(--text-dim);"></span>
                         </div>

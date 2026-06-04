@@ -961,6 +961,8 @@ async function initAboutPane() {
     } catch (e) {
         console.error('Failed to load version:', e);
     }
+    // 同步 localStorage 的代理设置到复选框/文本框
+    initUpdateProxyUI();
 }
 
 const aboutGithubLink = document.getElementById('about-github-link');
@@ -983,9 +985,86 @@ if (aboutCopyGithub) {
     };
 }
 
+// =============== 代理更新设置 (localStorage 持久化) ===============
+// 启动检查 + 手动检查共用同一套配置;首次安装未改过设置时默认走直连(海外/能上 GitHub 不打扰)
+const PROXY_USE_KEY = 'hostly-update-use-proxy';
+const PROXY_BASE_KEY = 'hostly-update-proxy-base';
+const PROXY_BASE_DEFAULT = 'https://ghproxy.com/';
+
+function getProxySettings() {
+    return {
+        useProxy: localStorage.getItem(PROXY_USE_KEY) === '1',
+        proxyBase: localStorage.getItem(PROXY_BASE_KEY) || PROXY_BASE_DEFAULT
+    };
+}
+
+function saveProxySettings(useProxy, proxyBase) {
+    localStorage.setItem(PROXY_USE_KEY, useProxy ? '1' : '0');
+    localStorage.setItem(PROXY_BASE_KEY, proxyBase);
+}
+
 const aboutCheckUpdateBtn = document.getElementById('about-check-update');
 const aboutUpdateStatus = document.getElementById('about-update-status');
 const aboutUpdateDetail = document.getElementById('about-update-detail');
+const aboutUseProxyCheckbox = document.getElementById('about-use-proxy-checkbox');
+const aboutProxyBaseInput = document.getElementById('about-proxy-base-input');
+
+// 打开设置面板时把 localStorage 同步到 UI
+function initUpdateProxyUI() {
+    if (!aboutUseProxyCheckbox || !aboutProxyBaseInput) return;
+    const { useProxy, proxyBase } = getProxySettings();
+    aboutUseProxyCheckbox.checked = useProxy;
+    aboutProxyBaseInput.value = proxyBase;
+}
+
+if (aboutUseProxyCheckbox) {
+    aboutUseProxyCheckbox.onchange = () => {
+        saveProxySettings(aboutUseProxyCheckbox.checked, (aboutProxyBaseInput.value || '').trim() || PROXY_BASE_DEFAULT);
+    };
+}
+if (aboutProxyBaseInput) {
+    aboutProxyBaseInput.onchange = () => {
+        saveProxySettings(!!(aboutUseProxyCheckbox && aboutUseProxyCheckbox.checked), (aboutProxyBaseInput.value || '').trim() || PROXY_BASE_DEFAULT);
+    };
+}
+
+// 统一检查更新函数(供手动按钮 + 启动检查共用)
+// 返回 { found:false } 或 { found:true, mode:'proxy'|'direct', version, notes, ... }
+// - mode='proxy' 时额外有 downloadUrl
+// - mode='direct' 时额外有 update(原 updater 对象)
+async function doCheckUpdate({ useProxy, proxyBase }) {
+    if (useProxy) {
+        if (!proxyBase) throw new Error('请填写代理地址');
+        const info = await invoke('check_update_with_proxy', { proxyBase });
+        if (!info || !info.url) {
+            return { found: false };
+        }
+        return {
+            found: true,
+            mode: 'proxy',
+            version: info.version,
+            notes: info.notes || '',
+            downloadUrl: info.url,
+        };
+    }
+    const updater = (tauri.updater && tauri.updater.check)
+        ? tauri.updater
+        : (window.__TAURI__ && window.__TAURI__.updater);
+    if (!updater || typeof updater.check !== 'function') {
+        throw new Error('更新插件未初始化');
+    }
+    const update = await updater.check();
+    if (update === null) {
+        return { found: false };
+    }
+    return {
+        found: true,
+        mode: 'direct',
+        version: update.version,
+        notes: update.notes || '',
+        update,
+    };
+}
 
 if (aboutCheckUpdateBtn) {
     aboutCheckUpdateBtn.onclick = async () => {
@@ -994,29 +1073,32 @@ if (aboutCheckUpdateBtn) {
         aboutUpdateStatus.style.color = 'var(--text-dim)';
         aboutUpdateDetail.textContent = '';
         try {
-            // Use the official tauri-plugin-updater JS API
-            const updater = (tauri.updater && tauri.updater.check)
-                ? tauri.updater
-                : (window.__TAURI__ && window.__TAURI__.updater);
-            if (!updater || typeof updater.check !== 'function') {
-                throw new Error('更新插件未初始化');
-            }
-            const update = await updater.check();
-            if (update === null) {
+            // 同步 UI 状态到 localStorage(用户改了就立刻记住,启动检查直接复用)
+            const useProxy = !!(aboutUseProxyCheckbox && aboutUseProxyCheckbox.checked);
+            const proxyBase = (aboutProxyBaseInput && aboutProxyBaseInput.value || '').trim();
+            saveProxySettings(useProxy, proxyBase || PROXY_BASE_DEFAULT);
+
+            const result = await doCheckUpdate({ useProxy, proxyBase });
+            if (!result.found) {
                 aboutUpdateStatus.textContent = '已是最新版本';
                 aboutUpdateStatus.style.color = '#3fb950';
             } else {
-                aboutUpdateStatus.textContent = `发现新版本 ${update.version}`;
+                aboutUpdateStatus.textContent = `发现新版本 ${result.version}`;
                 aboutUpdateStatus.style.color = '#d29922';
-                const yesNo = await ask(`发现新版本 ${update.version}，是否立即下载并安装？`, {
-                    title: '更新可用',
-                    kind: 'info',
-                });
-                if (yesNo) {
-                    aboutUpdateStatus.textContent = '下载中...';
-                    await update.downloadAndInstall();
-                    aboutUpdateStatus.textContent = '已下载,重启后生效';
-                    aboutUpdateStatus.style.color = '#3fb950';
+                if (result.mode === 'proxy') {
+                    aboutUpdateDetail.textContent = `即将打开下载链接(代理:${proxyBase})`;
+                    await invoke('hostly_open_url', { url: result.downloadUrl });
+                } else {
+                    const yesNo = await ask(`发现新版本 ${result.version}，是否立即下载并安装？`, {
+                        title: '更新可用',
+                        kind: 'info',
+                    });
+                    if (yesNo) {
+                        aboutUpdateStatus.textContent = '下载中...';
+                        await result.update.downloadAndInstall();
+                        aboutUpdateStatus.textContent = '已下载,重启后生效';
+                        aboutUpdateStatus.style.color = '#3fb950';
+                    }
                 }
             }
         } catch (e) {
@@ -1427,12 +1509,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 // =============== 启动更新检查 ===============
 async function checkUpdateOnStartup() {
     try {
-        const updater = (window.__TAURI__ && window.__TAURI__.updater)
-            ? window.__TAURI__.updater
-            : (tauri.updater || null);
-        if (!updater || typeof updater.check !== 'function') return;
-        const update = await updater.check();
-        if (update === null || !update.available) {
+        // 复用"关于"页的代理设置(localStorage 持久化,默认直连不打扰)
+        const { useProxy, proxyBase } = getProxySettings();
+        const result = await doCheckUpdate({ useProxy, proxyBase });
+        if (!result.found) {
             console.log('Already on latest version');
             return;
         }
@@ -1448,8 +1528,8 @@ async function checkUpdateOnStartup() {
         let cur = '当前版本';
         try { cur = await invoke('get_app_version'); } catch (_) {}
         curEl.textContent = cur;
-        latestEl.textContent = update.version || '—';
-        notesEl.textContent = update.notes || '（无更新说明）';
+        latestEl.textContent = result.version || '—';
+        notesEl.textContent = result.notes || '（无更新说明）';
         // 弹窗
         overlay.classList.remove('hidden');
         const dismiss = () => overlay.classList.add('hidden');
@@ -1457,18 +1537,27 @@ async function checkUpdateOnStartup() {
         yesBtn.onclick = async () => {
             yesBtn.disabled = true;
             noBtn.disabled = true;
-            yesBtn.textContent = '下载中...';
+            const originalYesText = yesBtn.textContent;
             try {
-                await update.downloadAndInstall();
-                // 下载完会提示重启才能生效
-                overlay.classList.add('hidden');
-                showToast('已下载,重启后生效', 'success');
+                if (result.mode === 'proxy') {
+                    // 走代理:直接用系统默认 handler 打开下载链接
+                    yesBtn.textContent = '打开中...';
+                    await invoke('hostly_open_url', { url: result.downloadUrl });
+                    overlay.classList.add('hidden');
+                    showToast('已打开下载链接', 'success');
+                } else {
+                    // 走直连:原生 downloadAndInstall
+                    yesBtn.textContent = '下载中...';
+                    await result.update.downloadAndInstall();
+                    overlay.classList.add('hidden');
+                    showToast('已下载,重启后生效', 'success');
+                }
             } catch (e) {
                 console.error('Update install failed:', e);
                 showToast(`更新失败: ${e}`, 'error');
                 yesBtn.disabled = false;
                 noBtn.disabled = false;
-                yesBtn.textContent = '立即更新';
+                yesBtn.textContent = originalYesText;
             }
         };
     } catch (e) {

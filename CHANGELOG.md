@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-06-04
+
+### 新增 (Added)
+- **检查更新支持 ghproxy 代理**:"关于"页「检查更新」按钮上方新增复选框 + 代理地址输入框(默认 `https://ghproxy.com/`)。勾选后,后端用 `minreq` 拉 `latest.json` 并 sed 替换当前 OS 对应 platform 的 `url` 字段走代理;发现新版本会直接调系统默认浏览器/下载工具打开拼接好的下载链接,避免中国网络下 `error sending request for url latest.json`。**启动检查**和**手动检查**共用同一套代理设置(localStorage 持久化,首次安装未改过时默认直连,不打扰海外用户)。不勾选时维持原 `tauri-plugin-updater` 直连 GitHub 的行为。
+
 ## [1.3.1] - 2026-06-04
 
 ### 修复 (Fixed)
