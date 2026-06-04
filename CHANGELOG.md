@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-06-04
+
+### 修复 (Fixed)
+- **托盘右键子菜单"快捷选择 hosts"不显示**:v1.3.0 加的托盘子菜单在所有已发布版本都没出现,根因是 `TrayIconBuilder::new()` 用 `TrayIconId::new_unique()` 生成随机 id,后续 `app.tray_by_id("main")` 永远拿不到,`rebuild_tray_menu` 直接 `return`,菜单没被替换,用户看到的还是 TrayIconBuilder 初始设的 `show + quit` 两项。改为 `TrayIconBuilder::with_id("main")` 固定 id,`tray_by_id` 才能取到。
+
 ## [1.3.2] - 2026-06-04
 
 ### 新增 (Added)

@@ -1,8 +1,10 @@
 name: Build
 
 on:
+  # 只在 push tag 时跑 CI(发版才需要 build + release)
+  # 日常 push main 不再触发,避免 push main + push tag 跑 2 次
+  # PR 仍走 pull_request 验证,workflow_dispatch 保留手动触发
   push:
-    branches: [main]
     tags: ['v*']
   pull_request:
     branches: [main]
