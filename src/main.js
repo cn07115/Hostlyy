@@ -989,7 +989,7 @@ if (aboutCopyGithub) {
 // 启动检查 + 手动检查共用同一套配置;首次安装未改过设置时默认走直连(海外/能上 GitHub 不打扰)
 const PROXY_USE_KEY = 'hostly-update-use-proxy';
 const PROXY_BASE_KEY = 'hostly-update-proxy-base';
-const PROXY_BASE_DEFAULT = 'https://gh.xmly.dev/';
+const PROXY_BASE_DEFAULT = 'https://gh-proxy.com/';
 
 function getProxySettings() {
     return {
@@ -1012,10 +1012,12 @@ const aboutProxyBaseInput = document.getElementById('about-proxy-base-input');
 // 打开设置面板时把 localStorage 同步到 UI
 function initUpdateProxyUI() {
     if (!aboutUseProxyCheckbox || !aboutProxyBaseInput) return;
-    // 一次性迁移:老默认(ghproxy.com / ghfast.top)-> 新默认(gh.xmly.dev)
+    // 一次性迁移:老默认(ghproxy.com / ghfast.top / gh.xmly.dev) -> 新默认(gh-proxy.com)
+    // gh-proxy.com 直接 200 返回,不走 302,绕开 minreq 的 redirect URL 解析 bug
+    // (minreq 2.x 把 "Location: /https://github.com/..." 错当 absolute URL, 报 invalid protocol)
     // 精确匹配,不误伤用户手动填的值
     const stored = localStorage.getItem(PROXY_BASE_KEY);
-    const oldDefaults = ['https://ghproxy.com/', 'https://ghfast.top/'];
+    const oldDefaults = ['https://ghproxy.com/', 'https://ghfast.top/', 'https://gh.xmly.dev/'];
     if (stored && oldDefaults.includes(stored)) {
         localStorage.setItem(PROXY_BASE_KEY, PROXY_BASE_DEFAULT);
     }
@@ -1046,10 +1048,19 @@ async function doCheckUpdate({ useProxy, proxyBase }) {
         if (!info || !info.url) {
             return { found: false };
         }
+        // 跟当前版本对比 — v1.3.7 之前代理模式不对比, 相同版本也报 "发现新版本"
+        // (v1.3.7 装过的 user 打开关于页就看到 "发现新版本 1.3.7" — bug)。
+        // tauri-plugin-updater 走 direct 模式内部会对比, 但 check_update_with_proxy
+        // 是我们自己写的, 必须自己比。
+        const currentVersion = await invoke('get_app_version');
+        if (!isVersionNewer(info.version, currentVersion)) {
+            return { found: false, current: currentVersion, latest: info.version };
+        }
         return {
             found: true,
             mode: 'proxy',
             version: info.version,
+            currentVersion,
             notes: info.notes || '',
             downloadUrl: info.url,
         };
@@ -1071,6 +1082,21 @@ async function doCheckUpdate({ useProxy, proxyBase }) {
         notes: update.notes || '',
         update,
     };
+}
+
+// semver 字符串比较: "1.3.7" vs "1.3.6" -> true; "1.3.7" vs "1.3.7" -> false
+// (v1.3.7 装了再检查更新时不报"发现新版本")
+function isVersionNewer(server, current) {
+    const ps = String(server).split('.').map(n => parseInt(n, 10) || 0);
+    const pc = String(current).split('.').map(n => parseInt(n, 10) || 0);
+    const len = Math.max(ps.length, pc.length);
+    for (let i = 0; i < len; i++) {
+        const ns = ps[i] || 0;
+        const nc = pc[i] || 0;
+        if (ns > nc) return true;
+        if (ns < nc) return false;
+    }
+    return false; // 完全相等
 }
 
 if (aboutCheckUpdateBtn) {
@@ -1407,18 +1433,15 @@ if (tauri.event && typeof tauri.event.listen === 'function') {
         const msg = event.payload || '未知错误';
         showToast(`WebDAV: ${msg}`, 'error');
     });
-    // 托盘子菜单点击:toggle 该 profile 的 active 状态(走 multi_select 规则:
-    //   multi_select=true  → toggle 它的 active
-    //   multi_select=false → 设为唯一 active(再点一次关掉)
-    // )+ 同时在编辑器打开它(让用户看到切换效果)
+    // 托盘子菜单点击: Rust 端已经做完 toggle + 实时同步托盘 ✓ 标记 +
+    // 系统通知 (tauri-plugin-notification), 前端这里只刷一下 sidebar profile
+    // 列表 (如果主窗口正好开着的) + 隐藏右下角 toast (用 Rust 系统通知替代)。
+    // 不再 selectProfile 开编辑器 (避免主窗口被抢到前台)。
     tauri.event.listen('tray-select-profile', (event) => {
         const id = event.payload;
         if (!id) return;
-        if (id === 'system' || id === 'common') {
-            selectProfile(id);
-        } else {
-            toggleProfile(id);
-            selectProfile(id);
+        if (typeof loadData === 'function') {
+            loadData().catch(err => console.warn('refresh after tray click failed:', err));
         }
     });
 }
