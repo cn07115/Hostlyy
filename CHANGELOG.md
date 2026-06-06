@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+## [1.3.8] - 2026-06-07
+
+### 修复
+- 修复 Windows GUI app stderr 看不到托盘错误的问题（托盘和通知相关日志同时写入 `%APPDATA%\com.hostly.switcher\hostlyy-tray.log`，方便排查 "托盘切换没写入 hosts" 等问题）
+
+### 变更
+- 同步 v1.3.7 的所有修复（代理 200 直出、版本对比、检查更新不卡主线程、托盘 native checkbox 渲染）+ 增加版本号（1.3.7 → 1.3.8）方便用户从 v1.3.7 直接 auto-upgrade（之前连续 5 次 force-push 同一 tag，用户无法 auto-update）
+
 ## [1.3.7] - 2026-06-05
 
 ### 修复
