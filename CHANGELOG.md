@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+## [1.3.9] - 2026-06-08
+
+### 修复
+- 修复"系统 Hosts（只读）"面板在托盘切换后不实时刷新的问题（主窗口操作时正常，从托盘切换时不会自动更新内容）
+- 修复 Windows GUI app stderr 看不到托盘/hosts 写入错误的问题（相关日志同时写入 `%APPDATA%\com.hostly.switcher\hostlyy-tray.log`，方便排查"托盘切换没写入 hosts"等问题）
+
+### 变更
+- bump 1.3.8 → 1.3.9，方便用户从 v1.3.8 直接 auto-upgrade
+
 ## [1.3.8] - 2026-06-07
 
 ### 修复

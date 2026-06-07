@@ -20,16 +20,26 @@ pub fn get_system_hosts() -> Result<String, String> {
 #[tauri::command]
 pub fn save_system_hosts(content: String) -> Result<(), String> {
     let path = get_hosts_path();
-    
+    crate::log_tray_str(&format!("[save_system_hosts] path={:?} content_len={}", path, content.len()));
+
     // Attempt normal write first
     match fs::write(&path, &content) {
-        Ok(_) => Ok(()),
+        Ok(()) => {
+            crate::log_tray_str(&format!("[save_system_hosts] fs::write Ok, content_len={}", content.len()));
+            // read-back verify: 实际写到磁盘的内容长度对不对
+            match fs::read_to_string(&path) {
+                Ok(actual) => crate::log_tray_str(&format!("[save_system_hosts] read-back verify Ok, actual_len={}, first_60={:?}", actual.len(), actual.chars().take(60).collect::<String>())),
+                Err(e) => crate::log_tray_str(&format!("[save_system_hosts] read-back FAILED: kind={:?} err={}", e.kind(), e)),
+            }
+            Ok(())
+        }
         Err(e) => {
+            crate::log_tray_str(&format!("[save_system_hosts] fs::write ERR: kind={:?} err={}", e.kind(), e));
             #[cfg(target_os = "macos")]
             {
                 let direct_err = e.to_string();
                 println!("Direct write failed: {}. Attempting elevation...", direct_err);
-                
+
                 // Try elevation
                 match save_hosts_elevated_macos(&content) {
                     Ok(_) => Ok(()),
@@ -39,7 +49,7 @@ pub fn save_system_hosts(content: String) -> Result<(), String> {
                     }
                 }
             }
-            
+
             #[cfg(not(target_os = "macos"))]
             Err(e.to_string())
         }

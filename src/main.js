@@ -221,6 +221,11 @@ async function loadData() {
         // Refresh editor if common is active
         if (currentProfileId === 'common') {
             editor.value = commonConfig;
+        } else if (currentProfileId === 'system') {
+            // 托盘切换也会走这里 (tray-select-profile listener → loadData),
+            // 主窗口的 "系统hosts(只读)" 面板要实时反映新内容。
+            systemHosts = await invoke('get_system_hosts');
+            editor.value = systemHosts;
         } else if (currentProfileId && currentProfileId !== 'system') {
             const p = profileMetadata.find(x => x.id === currentProfileId);
             if (p) {

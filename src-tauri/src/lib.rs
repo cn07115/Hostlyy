@@ -14,6 +14,24 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder, CheckMenuItem},
 };
 use std::io::Write;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// 全局 log 文件路径, 由首次带 AppHandle 的 log_tray 调用初始化,
+/// 之后无 AppHandle 的 log_tray_str (在 storage/hosts 里用) 直接复用。
+static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+fn write_log_line(path: &PathBuf, msg: &str) {
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new(".")));
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        let _ = writeln!(f, "[{}] {}", ts, msg);
+    }
+}
 
 /// 把 stderr 日志同时 append 到 `app_data_dir/hostlyy-tray.log`。
 /// Windows GUI app (windows_subsystem = "windows") 没 console, stderr 看不到,
@@ -22,17 +40,29 @@ use std::io::Write;
 fn log_tray(app: &tauri::AppHandle, msg: &str) {
     eprintln!("{}", msg);
     if let Ok(dir) = app.path().app_data_dir() {
-        let _ = std::fs::create_dir_all(&dir);
         let log_path = dir.join("hostlyy-tray.log");
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-        {
-            let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-            let _ = writeln!(f, "[{}] {}", ts, msg);
-        }
+        let _ = LOG_PATH.set(log_path.clone());
+        write_log_line(&log_path, msg);
     }
+}
+
+/// 无 AppHandle 版本: 给 storage.rs / hosts.rs 用, 复用 LOG_PATH
+/// (如果 lib.rs 还没初始化过 LOG_PATH, 用默认路径 %APPDATA%\com.hostly.switcher\hostlyy-tray.log)
+pub(crate) fn log_tray_str(msg: &str) {
+    eprintln!("{}", msg);
+    let path = LOG_PATH.get().cloned().unwrap_or_else(|| {
+        #[cfg(target_os = "windows")]
+        {
+            PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()))
+                .join("com.hostly.switcher")
+                .join("hostlyy-tray.log")
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            PathBuf::from("/tmp/hostlyy-tray.log")
+        }
+    });
+    write_log_line(&path, msg);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
