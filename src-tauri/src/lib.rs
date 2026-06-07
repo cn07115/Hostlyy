@@ -68,6 +68,17 @@ pub(crate) fn log_tray_str(msg: &str) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 单实例: 第二次启动 hostly.exe 时, 此 callback 在原实例进程里跑,
+        // 退出新启动的进程 (避免多开 + 重复 hosts 写入 / 托盘 / 通知)。
+        // 顺便把已运行实例的主窗口拉出来 + 聚焦, 用户感知是"我又开了一次 app"。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            crate::log_tray_str("[single-instance] 第二次启动被拦截, 聚焦已运行实例");
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -82,6 +93,16 @@ pub fn run() {
             }
 
             let window = app.get_webview_window("main").unwrap();
+
+            // 自启场景(--autostarted 启动)不应该弹主窗口,只是托盘常驻。
+            // JS 在 DOMContentLoaded 后 50ms 还会调 show_main_window 抢出窗口,
+            // 所以这里 hide 一下, 同时后面 show_main_window 命令里也加了短路。
+            if std::env::args().any(|a| a == "--autostarted") {
+                crate::log_tray_str("[startup] --autostarted mode, hide main window (tray only)");
+                let _ = window.hide();
+            } else {
+                crate::log_tray_str("[startup] normal mode, window 由 JS show_main_window 拉起");
+            }
 
             // tauri 2 不替换 tauri.conf.json title 里的 {{version}} 模板;
             // 运行时把版本号拼进标题
@@ -355,6 +376,12 @@ pub fn run() {
 
 #[tauri::command]
 fn show_main_window(window: tauri::Window) {
+    // 自启场景(--autostarted 启动)不应该弹主窗口,tray only 体验。
+    // JS 在 DOMContentLoaded 后会调这个,如果忽略 autostart 标记就会把窗口抢到前台。
+    if std::env::args().any(|a| a == "--autostarted") {
+        eprintln!("[show_main_window] skipped, --autostarted mode (tray only)");
+        return;
+    }
     window.show().unwrap();
     window.set_focus().unwrap();
 }

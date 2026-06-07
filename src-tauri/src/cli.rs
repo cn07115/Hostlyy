@@ -98,12 +98,21 @@ enum Commands {
 }
 
 pub fn run_cli(app: Option<&AppHandle>) -> bool {
-    // We need to parse args. 
+    // We need to parse args.
     // clap::Parser::parse() reads from std::env::args().
-    // If tauri app is run, first arg is binary path. 
+    // If tauri app is run, first arg is binary path.
     // If we have no args (length 1), we return false to let GUI run.
     let args: Vec<String> = std::env::args().collect();
     if args.len() <= 1 {
+        return false;
+    }
+
+    // 短路: Windows 自启标记 `--autostarted` (autostart.rs 写到 Run 键里的),
+    // 不是 CLI 子命令,不能让 clap 解析 → 否则 clap 报 unknown subcommand,
+    // run_cli 返回 true → lib.rs `std::process::exit(0)` → app 立刻退出,自启失败。
+    // 如果只有这一个 arg,直接走 GUI 模式。
+    if args.len() == 2 && args[1] == "--autostarted" {
+        eprintln!("[cli] --autostarted detected, skipping CLI parse, continuing to GUI");
         return false;
     }
 

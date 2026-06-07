@@ -22,35 +22,59 @@ mod imp {
     const AUTOSTART_ARG: &str = "--autostarted";
 
     pub fn set_auto_start(enable: bool) -> Result<(), String> {
+        crate::log_tray_str(&format!("[set_auto_start] enter, enable={}", enable));
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let run_key = hkcu
             .open_subkey_with_flags(RUN_KEY_PATH, KEY_SET_VALUE | KEY_QUERY_VALUE)
-            .map_err(|e| format!("打开 Run 键失败: {}", e))?;
+            .map_err(|e| {
+                let msg = format!("打开 Run 键失败: {}", e);
+                crate::log_tray_str(&format!("[set_auto_start] {}", msg));
+                msg
+            })?;
+        crate::log_tray_str("[set_auto_start] Run 键打开 Ok");
 
         // 清掉 tauri-plugin-autostart 2.5.1 留下的 StartupApproved\Run\Hostlyy
         // 跟踪表 (值 = 02 00 00 ... = "user has disabled", 让 Windows 不启动它)。
         // 不清这个值的话, 即便 Run 主键写对了 Windows 也会跳过我们。
         cleanup_plugin_leftover();
+        crate::log_tray_str("[set_auto_start] cleanup_plugin_leftover done");
 
         if enable {
             let exe = env::current_exe()
-                .map_err(|e| format!("获取当前 exe 路径失败: {}", e))?
+                .map_err(|e| {
+                    let msg = format!("获取当前 exe 路径失败: {}", e);
+                    crate::log_tray_str(&format!("[set_auto_start] {}", msg));
+                    msg
+                })?
                 .to_string_lossy()
                 .to_string();
             if exe.is_empty() {
+                crate::log_tray_str("[set_auto_start] ERR: exe 路径空");
                 return Err("当前 exe 路径为空".to_string());
             }
             // 路径可能有空格,加双引号包起来
             let value = format!("\"{}\" {}", exe, AUTOSTART_ARG);
+            crate::log_tray_str(&format!("[set_auto_start] writing Run\\{} = {}", VALUE_NAME, value));
             run_key
                 .set_value(VALUE_NAME, &value)
-                .map_err(|e| format!("写入 Run\\{} 失败: {}", VALUE_NAME, e))?;
+                .map_err(|e| {
+                    let msg = format!("写入 Run\\{} 失败: {}", VALUE_NAME, e);
+                    crate::log_tray_str(&format!("[set_auto_start] {}", msg));
+                    msg
+                })?;
+            crate::log_tray_str("[set_auto_start] write Ok");
         } else {
             // 删除时如果 value 不存在,忽略错误(用户本来就没开)
             match run_key.delete_value(VALUE_NAME) {
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(format!("删除 Run\\{} 失败: {}", VALUE_NAME, e)),
+                Ok(_) => crate::log_tray_str(&format!("[set_auto_start] deleted Run\\{}", VALUE_NAME)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    crate::log_tray_str(&format!("[set_auto_start] Run\\{} 本来就不存在, noop", VALUE_NAME));
+                }
+                Err(e) => {
+                    let msg = format!("删除 Run\\{} 失败: {}", VALUE_NAME, e);
+                    crate::log_tray_str(&format!("[set_auto_start] {}", msg));
+                    return Err(msg);
+                }
             }
         }
         Ok(())
@@ -72,8 +96,22 @@ mod imp {
     pub fn is_auto_start_enabled() -> bool {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         match hkcu.open_subkey_with_flags(RUN_KEY_PATH, KEY_QUERY_VALUE) {
-            Ok(run_key) => run_key.get_value::<String, _>(VALUE_NAME).is_ok(),
-            Err(_) => false,
+            Ok(run_key) => {
+                match run_key.get_value::<String, _>(VALUE_NAME) {
+                    Ok(v) => {
+                        crate::log_tray_str(&format!("[is_auto_start_enabled] Run\\{} = {} → true", VALUE_NAME, v));
+                        true
+                    }
+                    Err(e) => {
+                        crate::log_tray_str(&format!("[is_auto_start_enabled] Run\\{} 不存在 (kind={:?}) → false", VALUE_NAME, e.kind()));
+                        false
+                    }
+                }
+            }
+            Err(e) => {
+                crate::log_tray_str(&format!("[is_auto_start_enabled] 打开 Run 键失败: {} → false", e));
+                false
+            }
         }
     }
 }
